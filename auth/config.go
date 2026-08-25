@@ -31,6 +31,7 @@ type Config struct {
 	Providers           []string
 	GatedPaths          []string
 	LoginPath           string
+	LogoutPath          string
 	LogoutRedirect      string
 	AccessTokenMaxAge   time.Duration
 	RefreshTokenMaxAge  time.Duration
@@ -59,17 +60,20 @@ func New(config Config) (*Client, error) {
 	} else if config.IssuerInternal, err = normalizeIssuer(config.IssuerInternal); err != nil {
 		return nil, errorf(CodeInvalidConfig, "internal issuer: %v", err)
 	}
-	if strings.TrimSpace(config.ClientID) == "" || strings.TrimSpace(config.Resource) == "" {
+	if strings.TrimSpace(config.ClientID) == "" || !validResource(config.Resource) {
 		return nil, errorf(CodeInvalidConfig, "client ID and resource are required")
 	}
 	if config.CallbackPath == "" {
 		config.CallbackPath = "/api/auth/callback"
 	}
-	if !validAbsolutePath(config.CallbackPath) {
+	if !validLocalRoute(config.CallbackPath) {
 		return nil, errorf(CodeInvalidConfig, "callback path must be an absolute local path")
 	}
-	if strings.TrimSpace(config.CookiePrefix) == "" {
+	if strings.TrimSpace(config.CookiePrefix) == "" || (&http.Cookie{Name: config.CookiePrefix + "_at", Value: "x"}).Valid() != nil {
 		return nil, errorf(CodeInvalidConfig, "cookie prefix is required")
+	}
+	if config.SessionCookieDomain != "" && (&http.Cookie{Name: "session", Value: "x", Domain: config.SessionCookieDomain}).Valid() != nil {
+		return nil, errorf(CodeInvalidConfig, "session cookie domain is invalid")
 	}
 	if len(config.Providers) == 0 {
 		return nil, errorf(CodeInvalidConfig, "at least one provider is required")
@@ -92,11 +96,22 @@ func New(config Config) (*Client, error) {
 	if config.LoginPath == "" {
 		config.LoginPath = "/login"
 	}
+	if config.LogoutPath == "" {
+		config.LogoutPath = "/logout"
+	}
 	if config.LogoutRedirect == "" {
 		config.LogoutRedirect = "/"
 	}
+	if !validLocalRoute(config.LoginPath) || !validLocalRoute(config.LogoutPath) || !validAbsolutePath(config.LogoutRedirect) {
+		return nil, errorf(CodeInvalidConfig, "login, logout, and logout redirect paths must be local")
+	}
+	for _, path := range config.GatedPaths {
+		if !validGatedPath(path) {
+			return nil, errorf(CodeInvalidConfig, "gated path is invalid")
+		}
+	}
 	if config.HTTPClient == nil {
-		config.HTTPClient = http.DefaultClient
+		config.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -108,7 +123,7 @@ func New(config Config) (*Client, error) {
 
 func normalizeIssuer(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
 		return "", errorf(CodeInvalidConfig, "must be an absolute HTTP URL")
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
@@ -119,6 +134,27 @@ func normalizeIssuer(raw string) (string, error) {
 }
 
 func validAbsolutePath(path string) bool {
+	lower := strings.ToLower(path)
+	if strings.Contains(path, `\`) || strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+		return false
+	}
 	parsed, err := url.Parse(path)
 	return err == nil && strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//") && !parsed.IsAbs() && parsed.Host == ""
+}
+
+func validLocalRoute(path string) bool {
+	parsed, err := url.Parse(path)
+	return err == nil && parsed.RawQuery == "" && parsed.Fragment == "" && validAbsolutePath(path)
+}
+
+func validGatedPath(path string) bool {
+	if strings.HasSuffix(path, "/*") {
+		return validLocalRoute(strings.TrimSuffix(path, "*"))
+	}
+	return validLocalRoute(path)
+}
+
+func validResource(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.User == nil && parsed.Fragment == ""
 }

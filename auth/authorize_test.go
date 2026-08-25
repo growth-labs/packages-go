@@ -101,7 +101,15 @@ func TestAuthorizeAliasesEmailCodeAndRejectsUnknownProvider(t *testing.T) {
 func TestAuthorizeCollapsesUnsafeRedirectPaths(t *testing.T) {
 	client := newClient(t)
 	origin, _ := url.Parse("https://consumer.example.test")
-	for _, unsafe := range []string{"https://attacker.example/steal", "//attacker.example/steal", "javascript:alert(1)", "relative"} {
+	for _, unsafe := range []string{
+		"https://attacker.example/steal",
+		"//attacker.example/steal",
+		`/\\attacker.example/steal`,
+		"/%5c%5cattacker.example/steal",
+		"/%2f%2fattacker.example/steal",
+		"javascript:alert(1)",
+		"relative",
+	} {
 		_, transaction, err := client.Authorize(origin, "google", unsafe)
 		if err != nil {
 			t.Fatal(err)
@@ -131,7 +139,7 @@ func TestCookieHelpersUseCompatibleNamesAndSecureAttributes(t *testing.T) {
 			t.Errorf("cookie %s attributes = HttpOnly:%v Secure:%v SameSite:%v", cookie.Name, cookie.HttpOnly, cookie.Secure, cookie.SameSite)
 		}
 	}
-	for _, name := range []string{"consumer_pkce", "consumer_state", "consumer_redirect", "consumer_provider", "consumer_at", "consumer_rt"} {
+	for _, name := range []string{"consumer_pkce", "consumer_state", "consumer_redirect", "consumer_provider", "consumer_callback", "consumer_expires", "consumer_at", "consumer_rt"} {
 		if byName[name] == nil {
 			t.Errorf("missing cookie %s", name)
 		}
@@ -151,11 +159,96 @@ func TestCookieHelpersUseCompatibleNamesAndSecureAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if readTransaction.Verifier != transaction.Verifier || readTransaction.State != transaction.State || readTransaction.RedirectPath != "/account" || readTransaction.Provider != "password" {
+	if readTransaction.Verifier != transaction.Verifier || readTransaction.State != transaction.State || readTransaction.RedirectPath != "/account" || readTransaction.Provider != "password" || readTransaction.CallbackURI != transaction.CallbackURI || !readTransaction.ExpiresAt.Equal(transaction.ExpiresAt) {
 		t.Fatalf("read transaction = %#v", readTransaction)
 	}
 	access, refresh := client.SessionTokens(request)
 	if access != "access-token" || refresh != "refresh-token" {
 		t.Fatalf("session tokens = %q, %q", access, refresh)
+	}
+}
+
+func TestTransactionCookiesAreHostOnlyAndPreserveHTTPCallbackAndExpiry(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	client, err := New(Config{
+		Issuer:              "https://auth.fulcrum-labs.com",
+		ClientID:            "conformance-public-client",
+		Resource:            "http://localhost:4321",
+		CallbackPath:        "/api/auth/callback",
+		CookiePrefix:        "consumer",
+		SessionCookieDomain: ".example.test",
+		Providers:           []string{"google"},
+		Now:                 func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, _ := url.Parse("http://localhost:4321")
+	_, transaction, err := client.Authorize(origin, "google", "/account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	client.SetTransactionCookies(recorder, transaction)
+	client.SetSessionCookies(recorder, Tokens{AccessToken: "access", RefreshToken: "refresh"})
+	cookies := recorder.Result().Cookies()
+	for _, cookie := range cookies {
+		if strings.HasSuffix(cookie.Name, "_at") || strings.HasSuffix(cookie.Name, "_rt") {
+			if cookie.Domain != "example.test" {
+				t.Errorf("session cookie %s domain = %q", cookie.Name, cookie.Domain)
+			}
+		} else if cookie.Domain != "" {
+			t.Errorf("transaction cookie %s domain = %q, want host-only", cookie.Name, cookie.Domain)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/callback", nil)
+	request.Host = "localhost:4321"
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	readTransaction, err := client.TransactionFromRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readTransaction.CallbackURI != "http://localhost:4321/api/auth/callback" || !readTransaction.ExpiresAt.Equal(transaction.ExpiresAt) {
+		t.Fatalf("reconstructed transaction = %#v", readTransaction)
+	}
+
+	now = transaction.ExpiresAt.Add(time.Second)
+	if _, err := client.TransactionFromRequest(request); !IsCode(err, CodeInvalidState) {
+		t.Fatalf("expired browser transaction error = %v", err)
+	}
+}
+
+func TestNewUsesBoundedTransportAndRejectsUnsafeBoundaryConfig(t *testing.T) {
+	client := newClient(t)
+	if client.config.HTTPClient.Timeout <= 0 {
+		t.Fatal("default issuer HTTP client must have a total timeout")
+	}
+	base := Config{
+		Issuer:       "https://auth.fulcrum-labs.com",
+		ClientID:     "client",
+		Resource:     "https://consumer.example.test",
+		CallbackPath: "/api/auth/callback",
+		CookiePrefix: "consumer",
+		Providers:    []string{"google"},
+	}
+	for name, mutate := range map[string]func(*Config){
+		"issuer userinfo": func(config *Config) { config.Issuer = "https://user@auth.fulcrum-labs.com" },
+		"resource":        func(config *Config) { config.Resource = "relative-resource" },
+		"cookie prefix":   func(config *Config) { config.CookiePrefix = "bad prefix" },
+		"login path":      func(config *Config) { config.LoginPath = "//attacker.example" },
+		"logout path":     func(config *Config) { config.LogoutPath = "relative" },
+		"gated path":      func(config *Config) { config.GatedPaths = []string{"/safe/*", `\\attacker.example`} },
+		"cookie domain":   func(config *Config) { config.SessionCookieDomain = "bad domain" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := base
+			mutate(&config)
+			if _, err := New(config); !IsCode(err, CodeInvalidConfig) {
+				t.Fatalf("invalid config error = %v", err)
+			}
+		})
 	}
 }

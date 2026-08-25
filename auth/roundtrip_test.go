@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/growth-labs/packages-go/testkit"
 )
 
 type refreshRecord struct {
@@ -32,13 +34,15 @@ type roundTripIssuer struct {
 	server *httptest.Server
 	key    *ecdsa.PrivateKey
 
-	mu            sync.Mutex
-	now           time.Time
-	codeChallenge string
-	codeResource  string
-	refresh       map[string]*refreshRecord
-	nextRefresh   int
-	revoked       []string
+	mu               sync.Mutex
+	now              time.Time
+	codeChallenge    string
+	codeResource     string
+	refresh          map[string]*refreshRecord
+	nextRefresh      int
+	refreshCalls     int
+	revoked          []string
+	disableLateReuse bool
 }
 
 func newRoundTripIssuer(t *testing.T, now time.Time) *roundTripIssuer {
@@ -126,6 +130,9 @@ func (i *roundTripIssuer) token(response http.ResponseWriter, request *http.Requ
 		refresh := i.newRefreshToken()
 		i.writeTokens(response, refresh)
 	case "refresh_token":
+		i.mu.Lock()
+		i.refreshCalls++
+		i.mu.Unlock()
 		i.rotateRefresh(response, request.PostForm.Get("refresh_token"))
 	default:
 		roundTripOAuthError(response, "unsupported_grant_type", "Unsupported grant type")
@@ -151,7 +158,7 @@ func (i *roundTripIssuer) rotateRefresh(response http.ResponseWriter, token stri
 		return
 	}
 	if !record.usedAt.IsZero() {
-		if now.Sub(record.usedAt) <= 600*time.Second {
+		if now.Sub(record.usedAt) <= 600*time.Second || i.disableLateReuse {
 			successor := record.successor
 			i.mu.Unlock()
 			i.writeTokens(response, successor)
@@ -233,6 +240,12 @@ func (i *roundTripIssuer) revokedCount() int {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return len(i.revoked)
+}
+
+func (i *roundTripIssuer) refreshCount() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.refreshCalls
 }
 
 func TestFakeIssuerRoundTripAuthorizeCallbackVerifyRefreshReuseAndLogout(t *testing.T) {
@@ -402,6 +415,227 @@ func TestMiddlewareFailOpenFailClosedAndSecretFailure(t *testing.T) {
 	if issuerRequests.Load() != 0 {
 		t.Fatalf("issuer requests before secret failure = %d", issuerRequests.Load())
 	}
+}
+
+func TestCallbackValidatesStateBeforeOAuthError(t *testing.T) {
+	client := newMiddlewareClientForCallback(t, nil)
+	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
+		state := "wrong"
+		if mutation.GuardsDisabled() {
+			state = "expected"
+		}
+		_, transaction, err := client.Authorize(mustURL(t, "https://consumer.example.test"), "google", "/")
+		if err != nil {
+			return err
+		}
+		transaction.State = "expected"
+		cookies := httptest.NewRecorder()
+		client.SetTransactionCookies(cookies, transaction)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "https://consumer.example.test/api/auth/callback?error=access_denied&state="+state, nil)
+		for _, cookie := range cookies.Result().Cookies() {
+			request.AddCookie(cookie)
+		}
+		client.Callback(recorder, request)
+		if recorder.Code == http.StatusForbidden {
+			return errors.New("callback state rejected")
+		}
+		if recorder.Code != http.StatusFound {
+			return fmt.Errorf("unexpected callback status %d", recorder.Code)
+		}
+		return nil
+	})
+}
+
+func TestHTTPCallbackPreservesAuthorizedRedirectURI(t *testing.T) {
+	start := time.Unix(1_900_000_000, 0)
+	issuer := newRoundTripIssuer(t, start)
+	var client *Client
+	mux := http.NewServeMux()
+	mux.HandleFunc("/login", func(response http.ResponseWriter, request *http.Request) {
+		target, transaction, err := client.Authorize(&url.URL{Scheme: "http", Host: request.Host}, "google", "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.SetTransactionCookies(response, transaction)
+		http.Redirect(response, request, target.String(), http.StatusFound)
+	})
+	mux.HandleFunc("/api/auth/callback", clientCallback(&client))
+	mux.HandleFunc("/", func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })
+	app := httptest.NewServer(mux)
+	t.Cleanup(app.Close)
+
+	var err error
+	client, err = New(Config{
+		Issuer:       issuer.server.URL,
+		ClientID:     "roundtrip-client",
+		Resource:     app.URL,
+		CallbackPath: "/api/auth/callback",
+		CookiePrefix: "roundtrip-http",
+		Providers:    []string{"google"},
+		HTTPClient:   issuer.server.Client(),
+		Now:          issuer.currentTime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	loginResponse, err := noRedirect.Get(app.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loginResponse.Body.Close()
+	issuerResponse, err := noRedirect.Get(loginResponse.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer issuerResponse.Body.Close()
+	callbackRequest, err := http.NewRequest(http.MethodGet, issuerResponse.Header.Get("Location"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range loginResponse.Cookies() {
+		callbackRequest.AddCookie(cookie)
+	}
+	callbackResponse, err := noRedirect.Do(callbackRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer callbackResponse.Body.Close()
+	if callbackResponse.StatusCode != http.StatusFound || callbackResponse.Header.Get("Location") != "/" || cookieValue(callbackResponse.Cookies(), "roundtrip-http_at") == "" {
+		t.Fatalf("HTTP callback = %d %q cookies=%v", callbackResponse.StatusCode, callbackResponse.Header.Get("Location"), callbackResponse.Cookies())
+	}
+}
+
+func clientCallback(client **Client) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		(*client).Callback(response, request)
+	}
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+func TestMiddlewareBypassesLogoutRefreshAndStillClearsOnSecretFailure(t *testing.T) {
+	start := time.Unix(1_900_000_000, 0)
+	issuer := newRoundTripIssuer(t, start)
+	issuer.mu.Lock()
+	issuer.codeResource = "https://consumer.example.test"
+	issuer.mu.Unlock()
+	refresh := issuer.newRefreshToken()
+
+	newLogoutClient := func(secret SecretSource) *Client {
+		client, err := New(Config{
+			Issuer:       issuer.server.URL,
+			ClientID:     "roundtrip-client",
+			ClientSecret: secret,
+			Resource:     "https://consumer.example.test",
+			CallbackPath: "/api/auth/callback",
+			CookiePrefix: "roundtrip",
+			Providers:    []string{"google"},
+			LoginPath:    "/login",
+			LogoutPath:   "/logout",
+			HTTPClient:   issuer.server.Client(),
+			Now:          issuer.currentTime,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+
+	publicClient := newLogoutClient(nil)
+	publicRequest := httptest.NewRequest(http.MethodGet, "https://consumer.example.test/logout", nil)
+	publicRequest.AddCookie(&http.Cookie{Name: "roundtrip_at", Value: "expired"})
+	publicRequest.AddCookie(&http.Cookie{Name: "roundtrip_rt", Value: refresh})
+	publicResponse := httptest.NewRecorder()
+	publicClient.Middleware(http.HandlerFunc(publicClient.Logout)).ServeHTTP(publicResponse, publicRequest)
+	if issuer.refreshCount() != 0 || issuer.revokedCount() != 1 {
+		t.Fatalf("logout refreshes=%d revocations=%d", issuer.refreshCount(), issuer.revokedCount())
+	}
+	assertClearedSessionCookies(t, publicResponse.Result().Cookies())
+
+	secretClient := newLogoutClient(SecretSourceFunc(func(context.Context) (string, error) {
+		return "", errors.New("binding rejected")
+	}))
+	secretRequest := httptest.NewRequest(http.MethodGet, "https://consumer.example.test/logout", nil)
+	secretRequest.AddCookie(&http.Cookie{Name: "roundtrip_rt", Value: refresh})
+	secretResponse := httptest.NewRecorder()
+	secretClient.Middleware(http.HandlerFunc(secretClient.Logout)).ServeHTTP(secretResponse, secretRequest)
+	if secretResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("secret logout status = %d", secretResponse.Code)
+	}
+	assertClearedSessionCookies(t, secretResponse.Result().Cookies())
+}
+
+func newMiddlewareClientForCallback(t *testing.T, secret SecretSource) *Client {
+	t.Helper()
+	client, err := New(Config{
+		Issuer:       "https://auth.example.test",
+		ClientID:     "client",
+		ClientSecret: secret,
+		Resource:     "https://consumer.example.test",
+		CallbackPath: "/api/auth/callback",
+		CookiePrefix: "consumer",
+		Providers:    []string{"google"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func assertClearedSessionCookies(t *testing.T, cookies []*http.Cookie) {
+	t.Helper()
+	cleared := map[string]bool{}
+	for _, cookie := range cookies {
+		if cookie.MaxAge < 0 {
+			cleared[cookie.Name] = true
+		}
+	}
+	if !cleared["roundtrip_at"] || !cleared["roundtrip_rt"] {
+		t.Fatalf("cleared session cookies = %v", cleared)
+	}
+}
+
+func TestRefreshReuseGuardIsFalsifiableAtRefreshWiringPoint(t *testing.T) {
+	start := time.Unix(1_900_000_000, 0)
+	issuer := newRoundTripIssuer(t, start)
+	issuer.mu.Lock()
+	issuer.codeResource = "https://consumer.example.test"
+	issuer.mu.Unlock()
+	client, err := New(Config{
+		Issuer:       issuer.server.URL,
+		ClientID:     "roundtrip-client",
+		Resource:     "https://consumer.example.test",
+		CallbackPath: "/api/auth/callback",
+		CookiePrefix: "roundtrip",
+		Providers:    []string{"google"},
+		HTTPClient:   issuer.server.Client(),
+		Now:          issuer.currentTime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := issuer.newRefreshToken()
+	if _, _, err := client.Refresh(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	issuer.setTime(start.Add(601 * time.Second))
+
+	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
+		issuer.mu.Lock()
+		issuer.disableLateReuse = mutation.GuardsDisabled()
+		issuer.mu.Unlock()
+		_, _, err := client.Refresh(context.Background(), original)
+		return err
+	})
 }
 
 func readBody(t *testing.T, response *http.Response) string {

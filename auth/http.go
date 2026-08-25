@@ -11,6 +11,12 @@ type principalContextKey struct{}
 
 // Callback handles an OAuth authorization-code callback.
 func (c *Client) Callback(response http.ResponseWriter, request *http.Request) {
+	state := request.URL.Query().Get("state")
+	storedState := readCookie(request, c.cookieName("state"))
+	if state == "" || storedState == "" || !constantTimeEqual(state, storedState) {
+		http.Error(response, "Invalid state parameter", http.StatusForbidden)
+		return
+	}
 	transaction, err := c.TransactionFromRequest(request)
 	if err != nil {
 		if IsCode(err, CodeInvalidState) {
@@ -70,6 +76,10 @@ func (c *Client) Logout(response http.ResponseWriter, request *http.Request) {
 // Middleware resolves an optional principal and gates configured paths.
 func (c *Client) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if c.isAuthRoute(request.URL.Path) {
+			next.ServeHTTP(response, request)
+			return
+		}
 		accessToken, refreshToken := c.SessionTokens(request)
 		var principal Principal
 		authenticated := false
@@ -112,6 +122,10 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func (c *Client) isAuthRoute(path string) bool {
+	return path == c.config.CallbackPath || path == c.config.LoginPath || path == c.config.LogoutPath
 }
 
 // PrincipalFromContext reads a verified principal from a request context.

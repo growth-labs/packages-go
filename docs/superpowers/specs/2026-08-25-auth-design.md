@@ -33,6 +33,13 @@ contains browser and optional internal issuer URLs, client ID, optional
 paths, login/logout destinations, HTTP transport, clock, clock skew, and JWKS
 cache TTL.
 
+The callback URI and original transaction expiry are stored in host-only
+transaction cookies so HTTP localhost callbacks preserve the exact authorized
+redirect URI and callback reconstruction cannot silently renew an expired
+transaction. Session-cookie domain sharing never widens transaction-cookie
+scope. Middleware bypasses login, callback, and logout routes so logout cannot
+rotate a token immediately before revoking it.
+
 `Client.Authorize(origin, provider, redirectPath)` returns the browser redirect
 URL plus a `Transaction` containing the PKCE verifier, state, provider, redirect
 path, callback URI, and expiry. `email-code` is translated to issuer provider

@@ -1,0 +1,16 @@
+{
+	"contract": "growth-labs.identity.consumer",
+	"format_version": "1.0.0",
+	"issuer": "https://auth.fulcrum-labs.com",
+	"constants": {
+		"access_token_ttl_seconds": 900,
+		"refresh_token_ttl_seconds": 2592000,
+		"refresh_reuse_grace_seconds": 600
+	},
+	"cases": {
+		"authorize": "authorize.json",
+		"token": "token.json",
+		"refresh": "refresh.json",
+		"refusals": "refusals.json"
+	}
+}

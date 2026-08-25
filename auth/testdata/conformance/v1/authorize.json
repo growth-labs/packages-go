@@ -1,0 +1,18 @@
+{
+	"id": "authorize-pkce-resource",
+	"description": "Public client authorization request with PKCE S256 and an RFC 8707 resource indicator.",
+	"request": {
+		"method": "GET",
+		"path": "/authorize",
+		"query": {
+			"response_type": "code",
+			"client_id": "conformance-public-client",
+			"redirect_uri": "https://consumer.example.test/api/auth/callback",
+			"scope": "openid email profile",
+			"state": "conformance-state",
+			"code_challenge": "yUZWxjfg3WR9ttQRPHOXwncKHW1A6obp6p8EXUlbec4",
+			"code_challenge_method": "S256",
+			"resource": "https://consumer.example.test"
+		}
+	}
+}

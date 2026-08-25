@@ -1,0 +1,42 @@
+{
+	"id": "refresh-rotation-reuse",
+	"description": "Refresh rotation, bounded concurrent reuse, late refusal, and membership revocation.",
+	"request": {
+		"method": "POST",
+		"path": "/token",
+		"content_type": "application/x-www-form-urlencoded",
+		"form": {
+			"grant_type": "refresh_token",
+			"refresh_token": "<current-refresh-token>",
+			"client_id": "conformance-public-client",
+			"resource": "https://consumer.example.test"
+		}
+	},
+	"scenarios": {
+		"first_use": {
+			"status": 200,
+			"rotates_refresh_token": true
+		},
+		"reuse_within_grace": {
+			"at_or_before_seconds": 600,
+			"status": 200,
+			"same_successor_refresh_token": true
+		},
+		"reuse_after_grace": {
+			"after_seconds": 600,
+			"status": 400,
+			"body": {
+				"error": "invalid_grant",
+				"error_description": "Refresh token has been used or expired"
+			},
+			"current_chain_survives": true
+		},
+		"membership_removed": {
+			"status": 400,
+			"body": {
+				"error": "invalid_grant",
+				"error_description": "Grant is no longer authorized for its resource"
+			}
+		}
+	}
+}

@@ -6,12 +6,19 @@ import "fmt"
 type Code string
 
 const (
-	CodeInvalidConfig     Code = "invalid_config"
-	CodeInvalidProvider   Code = "invalid_provider"
-	CodeInvalidState      Code = "invalid_state"
-	CodeMissingPKCE       Code = "missing_pkce_verifier"
-	CodeInvalidToken      Code = "invalid_token"
-	CodeSecretUnavailable Code = "auth_service_unavailable"
+	CodeInvalidConfig       Code = "invalid_config"
+	CodeInvalidProvider     Code = "invalid_provider"
+	CodeInvalidState        Code = "invalid_state"
+	CodeMissingPKCE         Code = "missing_pkce_verifier"
+	CodeInvalidToken        Code = "invalid_token"
+	CodeInvalidSignature    Code = "invalid_signature"
+	CodeWrongIssuer         Code = "wrong_issuer"
+	CodeWrongAudience       Code = "wrong_audience"
+	CodeTokenExpired        Code = "token_expired"
+	CodeTokenNotYetValid    Code = "token_not_yet_valid"
+	CodeTokenIssuedInFuture Code = "token_issued_in_future"
+	CodeJWKSUnavailable     Code = "jwks_unavailable"
+	CodeSecretUnavailable   Code = "auth_service_unavailable"
 )
 
 // Error reports an authentication failure without reflecting sensitive input.

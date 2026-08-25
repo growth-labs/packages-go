@@ -44,6 +44,7 @@ type Config struct {
 // Client is an immutable OpenAuth consumer.
 type Client struct {
 	config Config
+	jwks   jwksCache
 }
 
 // New validates config and creates a client.

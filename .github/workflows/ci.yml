@@ -22,6 +22,15 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v5
         with:
           persist-credentials: false
+      - name: Authenticate private Go modules
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          git_config="$RUNNER_TEMP/packages-go-gitconfig"
+          git config --file "$git_config" url."https://x-access-token:${GH_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+          echo "GIT_CONFIG_GLOBAL=$git_config" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -45,6 +54,15 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v5
         with:
           persist-credentials: false
+      - name: Authenticate private Go modules
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          git_config="$RUNNER_TEMP/packages-go-gitconfig"
+          git config --file "$git_config" url."https://x-access-token:${GH_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+          echo "GIT_CONFIG_GLOBAL=$git_config" >> "$GITHUB_ENV"
       - name: Install the pinned Go toolchain
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:

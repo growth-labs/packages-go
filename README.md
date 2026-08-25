@@ -11,6 +11,8 @@ and `conformance` to `@growth-labs/conformance`.
 
 Current modules:
 
+- `auth` — OpenAuth authorization-code flow, ES256 JWKS verification, refresh,
+  secure session cookies, and `net/http` middleware.
 - `testkit` — JSON fixture runners, falsifiable-guard mutation helpers, and a
   disposable real-PostgreSQL harness.
 - `pg` — ordered PostgreSQL migrations, export gating, a version ledger, and

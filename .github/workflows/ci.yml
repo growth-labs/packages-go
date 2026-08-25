@@ -1,0 +1,75 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOPRIVATE: github.com/growth-labs/*
+  GO_VERSION: 1.26.6
+
+jobs:
+  quality:
+    name: quality
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v5
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Vet workspace modules
+        run: go vet ./testkit/... ./pg/... ./packaging/...
+      - name: Race-test workspace modules
+        run: go test -race ./testkit/... ./pg/... ./packaging/...
+
+  build:
+    name: build / ${{ matrix.target }}
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-amd64, darwin-arm64]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v5
+        with:
+          persist-credentials: false
+      - name: Install the pinned Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Build workspace modules
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          export GOOS="${TARGET%-*}"
+          export GOARCH="${TARGET#*-}"
+          export CGO_ENABLED=0
+          go build ./testkit/... ./pg/... ./packaging/...
+
+  runner-capabilities:
+    name: runner capabilities
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Report Docker capability without making it a dependency
+        run: |
+          set -euo pipefail
+          if command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
+            echo "Docker: available" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Docker: unavailable" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

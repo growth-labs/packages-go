@@ -18,6 +18,8 @@ const (
 	CodeTokenNotYetValid    Code = "token_not_yet_valid"
 	CodeTokenIssuedInFuture Code = "token_issued_in_future"
 	CodeJWKSUnavailable     Code = "jwks_unavailable"
+	CodeIssuerUnavailable   Code = "issuer_unavailable"
+	CodeInvalidResponse     Code = "invalid_response"
 	CodeSecretUnavailable   Code = "auth_service_unavailable"
 )
 

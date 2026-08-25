@@ -69,11 +69,19 @@ func (c *Client) Revoke(ctx context.Context, refreshToken string) error {
 	if refreshToken == "" {
 		return nil
 	}
-	response, err := c.postForm(ctx, "/revoke", url.Values{
+	secret, confidential, err := c.resolveSecret(ctx)
+	if err != nil {
+		return err
+	}
+	return c.revokeWithSecret(ctx, refreshToken, secret, confidential)
+}
+
+func (c *Client) revokeWithSecret(ctx context.Context, refreshToken, secret string, confidential bool) error {
+	response, err := c.postFormResolved(ctx, "/revoke", url.Values{
 		"token":           {refreshToken},
 		"token_type_hint": {"refresh_token"},
 		"client_id":       {c.config.ClientID},
-	})
+	}, secret, confidential)
 	if err != nil {
 		return err
 	}
@@ -86,7 +94,15 @@ func (c *Client) Revoke(ctx context.Context, refreshToken string) error {
 }
 
 func (c *Client) requestTokens(ctx context.Context, form url.Values) (Tokens, Principal, error) {
-	response, err := c.postForm(ctx, "/token", form)
+	secret, confidential, err := c.resolveSecret(ctx)
+	if err != nil {
+		return Tokens{}, Principal{}, err
+	}
+	return c.requestTokensResolved(ctx, form, secret, confidential)
+}
+
+func (c *Client) requestTokensResolved(ctx context.Context, form url.Values, secret string, confidential bool) (Tokens, Principal, error) {
+	response, err := c.postFormResolved(ctx, "/token", form, secret, confidential)
 	if err != nil {
 		return Tokens{}, Principal{}, err
 	}
@@ -116,6 +132,10 @@ func (c *Client) postForm(ctx context.Context, path string, form url.Values) (*h
 	if err != nil {
 		return nil, err
 	}
+	return c.postFormResolved(ctx, path, form, secret, confidential)
+}
+
+func (c *Client) postFormResolved(ctx context.Context, path string, form url.Values, secret string, confidential bool) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.IssuerInternal+path, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, errorf(CodeIssuerUnavailable, "build issuer request: %v", err)
@@ -130,6 +150,15 @@ func (c *Client) postForm(ctx context.Context, path string, form url.Values) (*h
 		return nil, errorf(CodeIssuerUnavailable, "issuer request failed: %v", err)
 	}
 	return response, nil
+}
+
+func (c *Client) refreshWithSecret(ctx context.Context, refreshToken, secret string, confidential bool) (Tokens, Principal, error) {
+	return c.requestTokensResolved(ctx, url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {c.config.ClientID},
+		"resource":      {c.config.Resource},
+	}, secret, confidential)
 }
 
 func (c *Client) resolveSecret(ctx context.Context) (string, bool, error) {

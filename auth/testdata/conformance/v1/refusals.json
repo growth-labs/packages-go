@@ -1,0 +1,48 @@
+{
+	"id": "oauth-refusals",
+	"description": "Consumer-visible gated-resource and resource-target refusals.",
+	"interactive_gated_resource": {
+		"transport": "oauth_redirect",
+		"status": 302,
+		"callback_query": {
+			"error": "access_denied",
+			"error_description": "Account is not authorized for the requested resource",
+			"state": "conformance-state"
+		}
+	},
+	"consumer_api_gated_resource": {
+		"request": {
+			"method": "POST",
+			"path": "/api/v1/auth/code/request",
+			"body": {
+				"client_id": "conformance-public-client",
+				"email": "outsider@example.test",
+				"resource": "https://consumer.example.test"
+			}
+		},
+		"response": {
+			"status": 403,
+			"body": {
+				"error": "access_denied",
+				"error_description": "Account is not authorized for the requested resource"
+			}
+		}
+	},
+	"missing_resource": {
+		"request": {
+			"method": "POST",
+			"path": "/api/v1/auth/code/request",
+			"body": {
+				"client_id": "conformance-public-client",
+				"email": "outsider@example.test"
+			}
+		},
+		"response": {
+			"status": 400,
+			"body": {
+				"error": "invalid_target",
+				"error_description": "resource is required when the client is registered for a gated resource"
+			}
+		}
+	}
+}

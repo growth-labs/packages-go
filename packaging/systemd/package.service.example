@@ -1,0 +1,25 @@
+[Unit]
+Description=Packaged Go service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=package-service
+Group=package-service
+EnvironmentFile=-/etc/package-service/package-service.env
+ExecStart=/opt/package-service/current/package-service
+Restart=always
+RestartSec=2
+StateDirectory=package-service
+RuntimeDirectory=package-service
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

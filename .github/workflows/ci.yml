@@ -14,7 +14,7 @@ env:
 
 jobs:
   quality:
-    name: quality
+    name: ci / quality
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:

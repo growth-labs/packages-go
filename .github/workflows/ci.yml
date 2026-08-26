@@ -14,7 +14,7 @@ env:
 jobs:
   quality:
     name: ci / quality
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out source
@@ -33,7 +33,7 @@ jobs:
 
   build:
     name: build / ${{ matrix.target }}
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -61,7 +61,7 @@ jobs:
 
   runner-capabilities:
     name: runner capabilities
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Report Docker capability without making it a dependency

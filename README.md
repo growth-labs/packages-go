@@ -20,23 +20,24 @@ Current modules:
 - `packaging` — static cross-builds, provenance, checksums, signed manifests,
   systemd, and health-checked symlink-swap deployment.
 
-This is a private repository. Consumers configure:
-
-```sh
-go env -w GOPRIVATE=github.com/growth-labs/*
-```
-
-CI sets the same `GOPRIVATE` pattern without changing the host-wide Go
-configuration.
-
-## Releases
-
-Modules version independently. Tag a release as `<module>/vX.Y.Z`, for
-example `pg/v0.1.0`, and consume it with:
+The repository and its tagged modules are public. Standard Go module resolution
+uses the public module proxy (`proxy.golang.org`) by default:
 
 ```sh
 go get github.com/growth-labs/packages-go/pg@v0.1.0
 ```
+
+Consumers that prefer direct GitHub resolution can opt into it without a
+repository token or Git URL rewrite:
+
+```sh
+GOPROXY=direct go get github.com/growth-labs/packages-go/pg@v0.1.0
+```
+
+## Releases
+
+Modules version independently. Tag a release as `<module>/vX.Y.Z`, for example
+`pg/v0.1.0`.
 
 ## Extraction rule
 

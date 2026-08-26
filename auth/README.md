@@ -9,11 +9,18 @@ membership walls, local roles, entitlements, and product access decisions.
 
 ## Install
 
-This repository is private:
+The module is public and resolves through Go's default public module proxy
+(`proxy.golang.org`):
 
 ```sh
-go env -w GOPRIVATE=github.com/growth-labs/*
 go get github.com/growth-labs/packages-go/auth@v0.1.0
+```
+
+Direct GitHub resolution is also available without a repository token or Git
+URL rewrite:
+
+```sh
+GOPROXY=direct go get github.com/growth-labs/packages-go/auth@v0.1.0
 ```
 
 ## Configure

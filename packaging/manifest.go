@@ -83,6 +83,19 @@ func Seal(ctx context.Context, directory string, metadata Metadata, privateKey e
 // Verify authenticates the detached signature and re-hashes the exact payload
 // file set after transport.
 func Verify(ctx context.Context, directory string, publicKey ed25519.PublicKey) (Manifest, error) {
+	return VerifyAny(ctx, directory, publicKey)
+}
+
+// VerifyAny authenticates the detached signature against any one of the
+// given trusted public keys, succeeding as soon as one authenticates it, then
+// re-hashes the exact payload file set after transport. Callers rotating a
+// signing key pass the current key plus any previous key(s) still needed to
+// verify not-yet-superseded artifacts (e.g. older signed backups); once
+// nothing trusts a retired key anymore, drop it from the list.
+func VerifyAny(ctx context.Context, directory string, publicKeys ...ed25519.PublicKey) (Manifest, error) {
+	if len(publicKeys) == 0 {
+		return Manifest{}, fmt.Errorf("at least one trusted public key is required")
+	}
 	manifestBytes, err := os.ReadFile(filepath.Join(directory, ManifestName))
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read artifact manifest: %w", err)
@@ -95,8 +108,15 @@ func Verify(ctx context.Context, directory string, publicKey ed25519.PublicKey) 
 	if err != nil {
 		return Manifest{}, fmt.Errorf("decode detached signature: %w", err)
 	}
-	if !ed25519.Verify(publicKey, manifestBytes, signature) {
-		return Manifest{}, fmt.Errorf("detached signature does not authenticate manifest")
+	authenticated := false
+	for _, publicKey := range publicKeys {
+		if ed25519.Verify(publicKey, manifestBytes, signature) {
+			authenticated = true
+			break
+		}
+	}
+	if !authenticated {
+		return Manifest{}, fmt.Errorf("detached signature does not authenticate manifest against any trusted key")
 	}
 
 	var manifest Manifest

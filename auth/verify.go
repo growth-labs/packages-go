@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-var userSubjectPattern = regexp.MustCompile(`^user:([0-7][0-9A-HJKMNP-TV-Z]{25})$`)
+// The issuer preserves existing UUID identities and generates uppercase ULIDs for
+// new identities. Accept RFC-variant UUID versions 1–8 without normalizing their
+// text: validateClaims still requires exact subject/property identity binding.
+var userSubjectPattern = regexp.MustCompile(`^user:([0-7][0-9A-HJKMNP-TV-Z]{25}|(?i:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}))$`)
 
 type jwtHeader struct {
 	Algorithm string `json:"alg"`

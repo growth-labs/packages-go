@@ -33,6 +33,7 @@ type roundTripIssuer struct {
 	t      *testing.T
 	server *httptest.Server
 	key    *ecdsa.PrivateKey
+	userID string
 
 	mu               sync.Mutex
 	now              time.Time
@@ -51,7 +52,7 @@ func newRoundTripIssuer(t *testing.T, now time.Time) *roundTripIssuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer := &roundTripIssuer{t: t, key: key, now: now, refresh: make(map[string]*refreshRecord)}
+	issuer := &roundTripIssuer{t: t, key: key, userID: "01KP8KA31Z3AGRCC578R9HXW0H", now: now, refresh: make(map[string]*refreshRecord)}
 	issuer.server = httptest.NewServer(http.HandlerFunc(issuer.serveHTTP))
 	t.Cleanup(issuer.server.Close)
 	return issuer
@@ -142,7 +143,7 @@ func (i *roundTripIssuer) token(response http.ResponseWriter, request *http.Requ
 func (i *roundTripIssuer) newRefreshToken() string {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	token := fmt.Sprintf("user:01KP8KA31Z3AGRCC578R9HXW0H:refresh-%d", i.nextRefresh)
+	token := fmt.Sprintf("user:%s:refresh-%d", i.userID, i.nextRefresh)
 	i.nextRefresh++
 	i.refresh[token] = &refreshRecord{}
 	return token
@@ -168,7 +169,7 @@ func (i *roundTripIssuer) rotateRefresh(response http.ResponseWriter, token stri
 		roundTripOAuthError(response, "invalid_grant", "Refresh token has been used or expired")
 		return
 	}
-	successor := fmt.Sprintf("user:01KP8KA31Z3AGRCC578R9HXW0H:refresh-%d", i.nextRefresh)
+	successor := fmt.Sprintf("user:%s:refresh-%d", i.userID, i.nextRefresh)
 	i.nextRefresh++
 	record.usedAt = now
 	record.successor = successor
@@ -199,7 +200,7 @@ func (i *roundTripIssuer) signAccessToken() string {
 	header, _ := json.Marshal(map[string]any{"alg": "ES256", "kid": "roundtrip-key", "typ": "JWT"})
 	payload, _ := json.Marshal(map[string]any{
 		"iss":       i.server.URL,
-		"sub":       "user:01KP8KA31Z3AGRCC578R9HXW0H",
+		"sub":       "user:" + i.userID,
 		"aud":       resource,
 		"mode":      "access",
 		"type":      "user",
@@ -210,7 +211,7 @@ func (i *roundTripIssuer) signAccessToken() string {
 		"nbf":       now.Add(-time.Second).Unix(),
 		"exp":       now.Add(15 * time.Minute).Unix(),
 		"properties": map[string]any{
-			"userId":    "01KP8KA31Z3AGRCC578R9HXW0H",
+			"userId":    i.userID,
 			"email":     "member@example.test",
 			"name":      "Round Trip Member",
 			"image":     nil,
@@ -249,8 +250,21 @@ func (i *roundTripIssuer) refreshCount() int {
 }
 
 func TestFakeIssuerRoundTripAuthorizeCallbackVerifyRefreshReuseAndLogout(t *testing.T) {
+	for _, test := range []struct{ name, userID string }{
+		{"ULID", "01KP8KA31Z3AGRCC578R9HXW0H"},
+		{"UUID", "a340f47a-1e32-4a80-9125-15ef5db0151c"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testCanonicalIdentityRoundTrip(t, test.userID)
+		})
+	}
+}
+
+func testCanonicalIdentityRoundTrip(t *testing.T, userID string) {
+	t.Helper()
 	start := time.Unix(1_900_000_000, 0)
 	issuer := newRoundTripIssuer(t, start)
+	issuer.userID = userID
 	var client *Client
 
 	mux := http.NewServeMux()
@@ -314,8 +328,15 @@ func TestFakeIssuerRoundTripAuthorizeCallbackVerifyRefreshReuseAndLogout(t *test
 		t.Fatal(err)
 	}
 	body := readBody(t, response)
-	if response.StatusCode != http.StatusOK || body != "user:01KP8KA31Z3AGRCC578R9HXW0H" {
+	if response.StatusCode != http.StatusOK || body != "user:"+userID {
 		t.Fatalf("callback final response = %d %q", response.StatusCode, body)
+	}
+	response, err = browser.Get(app.URL + "/private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := readBody(t, response); response.StatusCode != http.StatusOK || body != "user:"+userID {
+		t.Fatalf("session reload response = %d %q", response.StatusCode, body)
 	}
 	appURL, _ := url.Parse(app.URL)
 	initialRefresh := cookieValue(jar.Cookies(appURL), "roundtrip_rt")

@@ -131,8 +131,10 @@ http.ListenAndServe(":8080", client.Middleware(mux))
 
 `Principal` contains:
 
-- `Subject`: the raw `user:<ULID>` issuer subject.
-- `UserID`: the stripped ULID used at application storage boundaries.
+- `Subject`: the raw `user:<ID>` issuer subject. IDs may be canonical uppercase
+  ULIDs or hyphenated RFC-variant UUIDs (versions 1–8; hexadecimal case preserved).
+- `UserID`: the subject ID used at application storage boundaries. It must match
+  `properties.userId` byte for byte; verification never normalizes or rewrites it.
 - `Email`, `Name`, and `Image`: identity claims from `properties.*`.
 - `Roles`: issuer roles. Applications still enforce their own wall and roles.
 - `Audiences`: verified JWT audiences; the configured resource must be present.

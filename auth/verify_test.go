@@ -189,6 +189,61 @@ func TestVerifyMaterializesPrincipalFromValidES256Token(t *testing.T) {
 	}
 }
 
+func TestVerifyCanonicalIdentityFormatsAndExactBinding(t *testing.T) {
+	now := time.Unix(1_900_000_000, 0)
+	server := newJWKSServer(t)
+	base := newJWTFixture(t, "https://auth.fulcrum-labs.com", now)
+	server.set([]map[string]any{jwkFor(base.key, base.kid)}, http.StatusOK)
+	client := verifierClient(t, base.issuer, server.server.URL, func() time.Time { return now })
+	const uuid = "a340f47a-1e32-4a80-9125-15ef5db0151c"
+	tests := []struct {
+		name, subjectID, propertyID string
+		valid                       bool
+	}{
+		{"canonical ULID", "01KP8KA31Z3AGRCC578R9HXW0H", "01KP8KA31Z3AGRCC578R9HXW0H", true},
+		{"canonical UUID", uuid, uuid, true},
+		{"different UUID property", uuid, "b340f47a-1e32-4a80-9125-15ef5db0151c", false},
+		{"UUID property case mismatch", uuid, strings.ToUpper(uuid), false},
+		{"uppercase UUID", strings.ToUpper(uuid), strings.ToUpper(uuid), true},
+		{"mixed case UUID", "a340F47a-1E32-4a80-9125-15ef5db0151C", "a340F47a-1E32-4a80-9125-15ef5db0151C", true},
+		{"UUID version 1 variant 8", "a340f47a-1e32-1a80-8125-15ef5db0151c", "a340f47a-1e32-1a80-8125-15ef5db0151c", true},
+		{"UUID version 8 variant b", "a340f47a-1e32-8a80-b125-15ef5db0151c", "a340f47a-1e32-8a80-b125-15ef5db0151c", true},
+		{"lowercase ULID", "01kp8ka31z3agrcc578r9hxw0h", "01kp8ka31z3agrcc578r9hxw0h", false},
+		{"unhyphenated UUID", "a340f47a1e324a80912515ef5db0151c", "a340f47a1e324a80912515ef5db0151c", false},
+		{"invalid UUID hex", "g340f47a-1e32-4a80-9125-15ef5db0151c", "g340f47a-1e32-4a80-9125-15ef5db0151c", false},
+		{"invalid UUID version", "a340f47a-1e32-0a80-9125-15ef5db0151c", "a340f47a-1e32-0a80-9125-15ef5db0151c", false},
+		{"reserved UUID version", "a340f47a-1e32-9a80-9125-15ef5db0151c", "a340f47a-1e32-9a80-9125-15ef5db0151c", false},
+		{"invalid UUID variant", "a340f47a-1e32-4a80-7125-15ef5db0151c", "a340f47a-1e32-4a80-7125-15ef5db0151c", false},
+		{"reserved UUID variant", "a340f47a-1e32-4a80-c125-15ef5db0151c", "a340f47a-1e32-4a80-c125-15ef5db0151c", false},
+		{"invalid ULID first character", "81KP8KA31Z3AGRCC578R9HXW0H", "81KP8KA31Z3AGRCC578R9HXW0H", false},
+		{"opaque string", "arbitrary-account", "arbitrary-account", false},
+		{"trailing whitespace", uuid + " ", uuid + " ", false},
+		{"trailing newline", uuid + "\n", uuid + "\n", false},
+		{"embedded subject prefix", "user:" + uuid, "user:" + uuid, false},
+		{"empty identity", "", "", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := base
+			fixture.subject = "user:" + test.subjectID
+			fixture.userID = test.propertyID
+			principal, err := client.Verify(context.Background(), fixture.token(t))
+			if !test.valid {
+				if !IsCode(err, CodeInvalidToken) {
+					t.Fatalf("malformed or inconsistent identity error = %v, want invalid_token", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonical identity rejected: %v", err)
+			}
+			if principal.Subject != "user:"+test.subjectID || principal.UserID != test.propertyID {
+				t.Fatal("verification must preserve the canonical subject and user ID exactly")
+			}
+		})
+	}
+}
+
 func TestVerifyAudienceIssuerAndExpiryGuardsAreFalsifiable(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0)
 	server := newJWKSServer(t)

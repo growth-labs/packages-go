@@ -1,0 +1,130 @@
+# Growth Labs Go package catalog.
+#
+# One entry per workspace module, in the same shape as
+# growth-labs/packages/docs/agent/package-catalog.yaml minus required_bindings
+# (a Go service has no Workers bindings). Read this before writing a shared
+# helper: if an entry already serves the need, extend it instead.
+#
+# Completeness is a gate, not a habit: scripts/check-package-catalog.sh fails
+# CI when a `use (...)` entry in go.work has no entry here, when an entry names
+# no module, when a working_example_path does not exist, or when a
+# related_packages name does not resolve. platform-foundations loads this file
+# to render the estate-wide shared-capability index.
+packages:
+  auth:
+    name: "github.com/growth-labs/packages-go/auth"
+    summary: "OpenAuth relying-party client for Go services: authorization-code flow, ES256 access-token verification, refresh rotation, secure session cookies, and net/http middleware."
+    stability: stable
+    use_when:
+      - "A Go service needs sign-in, sessions, or JWT verification against the shared OpenAuth issuer."
+      - "A Go HTTP handler needs a resolved principal on the request."
+    do_not_use_when:
+      - "You need to run an auth issuer; that is growth-labs/identity-platform."
+      - "You need product authorization (membership walls, roles, entitlements): this module is identity plumbing, and the consumer owns those decisions."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/auth"
+      - "auth.New(auth.Config{Issuer, ClientID, Resource, CallbackPath, CookiePrefix, Providers, GatedPaths, LoginPath, LogoutPath})"
+      - "Mount the client's middleware ahead of the gated routes"
+    required_env: []
+    working_example_path: "auth/cmd/example/main.go"
+    common_mistakes:
+      - "Treating the module as an issuer instead of a relying-party client."
+      - "Standing up a second sign-in path for one app instead of registering a client with the shared issuer."
+      - "Putting entitlement or role checks inside the module instead of in the consuming service."
+    related_packages: ["testkit"]
+
+  email:
+    name: "github.com/growth-labs/packages-go/email"
+    summary: "Fastmail JMAP transactional email for Go services: session discovery, estate identity selection, send, and sender-side delivery proof."
+    stability: maturing
+    use_when:
+      - "A Go service must send a transactional message: an alert, an invitation, a receipt, a report."
+      - "A caller must prove afterwards that a specific message reached the account's Sent mailbox."
+      - "A caller must decide whether a failed send is safe to retry (IsUnsubmitted)."
+    do_not_use_when:
+      - "The work is bulk or campaign sending, list management, or unsubscribe handling."
+      - "The service runs on the Workers runtime in TypeScript: use @growth-labs/email (transactional) or @growth-labs/mailer (campaigns)."
+      - "You need inbound mail, mailbox sync, or JMAP beyond composing and submitting one message."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/email"
+      - "Place the JMAP bearer token in a mode-0600 file on the host; the value's home is Vaultwarden (fastmail-api-token)"
+      - "token, err := email.LoadTokenFile(path); client, err := email.New(token, httpClient)"
+      - "client.Send(ctx, to, subject, body), then client.VerifyDelivered(ctx, messageID, timeout) when delivery must be proven"
+    required_env: []
+    working_example_path: "email/example_test.go"
+    common_mistakes:
+      - "Building an app-local mail client instead of using this module: Fastmail JMAP is the estate's Go email transport, and a second implementation is a defect."
+      - "Retrying every failed send: only IsUnsubmitted(err) proves nothing was submitted; a lost response may already have been delivered."
+      - "Reading the token from an environment variable or a wider-than-0600 file; LoadTokenFile refuses anything else."
+      - "Treating a successful Send as delivery proof: it is API acceptance, and VerifyDelivered is the sender-side evidence."
+    related_packages: ["testkit"]
+
+  packaging:
+    name: "github.com/growth-labs/packages-go/packaging"
+    summary: "Fleet packaging and deployment conventions for Go services: static cross-builds with provenance, portable checksums, signed artifact manifests, hardened systemd units, and health-checked symlink-swap deployment with rollback."
+    stability: stable
+    use_when:
+      - "A Go service needs reproducible release artifacts with a verifiable version and revision stamp."
+      - "A host deployment needs an atomic symlink swap with a health gate and automatic rollback."
+      - "An installer must verify a signed manifest before activating an artifact."
+    do_not_use_when:
+      - "The service deploys to the Workers runtime rather than to a fleet host."
+      - "You only need a checksum: use crypto/sha256 directly."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/packaging"
+      - "Run scripts/build.sh with PACKAGE_MAIN and PACKAGE_NAME set"
+      - "Sign the emitted manifest and verify it with packaging.Verify / packaging.VerifyAny before activation"
+      - "Deploy with scripts/deploy.sh so the symlink swap keeps its health gate and rollback"
+    required_env: []
+    working_example_path: "packaging/roundtrip_test.go"
+    common_mistakes:
+      - "Hand-rolling a per-service build or install script instead of extending these conventions."
+      - "Copying binaries into place instead of swapping the symlink, which loses the rollback path."
+      - "Activating an artifact before its manifest signature is verified."
+    related_packages: []
+
+  pg:
+    name: "github.com/growth-labs/packages-go/pg"
+    summary: "Forward-only PostgreSQL migrations with a version ledger, an export gate that refuses to migrate without a fresh backup receipt, and owned pgx transaction helpers."
+    stability: stable
+    use_when:
+      - "A Go service owns a PostgreSQL schema and applies ordered migrations at start-up or on deploy."
+      - "An application operation needs one owned pgx transaction with commit-on-success and rollback-on-error."
+    do_not_use_when:
+      - "The store is D1/SQLite or anything other than PostgreSQL."
+      - "You want reversible or out-of-order migrations: this runner is deliberately forward-only and strictly increasing."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/pg"
+      - "Declare the migration list and wire an ExportGate that returns a recent backup receipt"
+      - "Runner.Apply(ctx, pool, migrations) at start-up; set Runner.MaxExportAge to tighten the 24h default"
+      - "Use pg.WithTx for application transactions, never for migrations"
+    required_env: []
+    working_example_path: "pg/runner_test.go"
+    common_mistakes:
+      - "Writing an ad hoc migration table per service instead of using the packages_go_schema_migrations ledger."
+      - "Renumbering or editing an applied migration: the runner detects version and name drift and refuses."
+      - "Waiving the export gate without a WaiverReason, or waiving it routinely instead of fixing the backup."
+    related_packages: ["testkit"]
+
+  testkit:
+    name: "github.com/growth-labs/packages-go/testkit"
+    summary: "Shared test harness: strict JSON fixture runners, the falsifiable-guard mutation helper (ProveGuard), and a disposable real-PostgreSQL harness."
+    stability: stable
+    use_when:
+      - "A test must prove a guard is both wired and falsifiable, per CONVENTIONS.md."
+      - "A conformance or parity suite runs from JSON fixtures and needs deterministic ordering."
+      - "A test needs a real, disposable PostgreSQL instance rather than a mock."
+    do_not_use_when:
+      - "You are writing production code: this module is test-only and belongs in a test dependency."
+      - "A plain table-driven test already proves the behaviour."
+    minimal_setup:
+      - "Add github.com/growth-labs/packages-go/testkit to the module's requirements"
+      - "testkit.ProveGuard(t, func(m testkit.Mutation) error { ... }) at the public wiring point"
+      - "testkit.LoadJSON for fixture suites; testkit/postgres for a disposable instance"
+    required_env: []
+    working_example_path: "testkit/examples/guards_test.go"
+    common_mistakes:
+      - "Asserting an internal helper was called instead of asserting consumer-visible rejection."
+      - "Proving a guard in isolation rather than at the production wiring point, which hides an unwired guard."
+      - "Mocking PostgreSQL instead of using the disposable real instance."
+    related_packages: []

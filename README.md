@@ -13,6 +13,8 @@ Current modules:
 
 - `auth` — OpenAuth authorization-code flow, ES256 JWKS verification, refresh,
   secure session cookies, and `net/http` middleware.
+- `email` — Fastmail JMAP transactional email: estate identity selection,
+  send, and sender-side delivery proof.
 - `testkit` — JSON fixture runners, falsifiable-guard mutation helpers, and a
   disposable real-PostgreSQL harness.
 - `pg` — ordered PostgreSQL migrations, export gating, a version ledger, and
@@ -38,6 +40,15 @@ GOPROXY=direct go get github.com/growth-labs/packages-go/pg@v0.1.0
 
 Modules version independently. Tag a release as `<module>/vX.Y.Z`, for example
 `pg/v0.1.0`.
+
+## Package catalog
+
+`docs/agent/package-catalog.yaml` is the machine-readable index an agent reads
+before writing a shared helper: what each module is for, when not to use it,
+its worked example, and its common mistakes. `scripts/check-package-catalog.sh`
+fails CI when it drifts from `go.work` in either direction, when a worked
+example does not exist, or when a `related_packages` name does not resolve.
+platform-foundations renders it into the estate-wide shared-capability index.
 
 ## Extraction rule
 

@@ -7,5 +7,6 @@ use (
 	./email
 	./packaging
 	./pg
+	./s3
 	./testkit
 )

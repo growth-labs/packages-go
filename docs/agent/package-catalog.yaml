@@ -106,6 +106,29 @@ packages:
       - "Waiving the export gate without a WaiverReason, or waiving it routinely instead of fixing the backup."
     related_packages: ["testkit"]
 
+  s3:
+    name: "github.com/growth-labs/packages-go/s3"
+    summary: "Dependency-free SigV4 client for one S3-compatible, path-style bucket: streamed Get (Range-forwarding), prefix-scoped List/Delete, and a small-payload Put — no SDK."
+    stability: maturing
+    use_when:
+      - "A Go service must stream one object's bytes through to an HTTP response (e.g. proxying a <video> tag's Range requests) without holding the whole file in memory or handing the client a credential."
+      - "A Go service needs prefix-scoped object listing/deletion for operator-driven cleanup, or to upload a small fully-buffered payload (a JSON receipt, a manifest)."
+    do_not_use_when:
+      - "You need multipart/large-object upload or a general ArtifactStore (source/target references, publish/inspect) abstraction: fulcrum-labs/foundry's capabilityplane/object.go is a fuller client with that shape and predates this extraction; extend this package rather than building a second implementation if that need arrives here."
+      - "The bucket only supports virtual-hosted-style addressing: NewClient requires path-style."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/s3"
+      - "client, err := s3.NewClient(s3.Config{Endpoint, Region, Bucket, PathStyle: true, AccessKeyID, SecretAccessKey}, httpClient)"
+      - "response, err := client.Get(ctx, key, rangeHeader); stream response.Body to the caller"
+    required_env: []
+    working_example_path: "s3/example_test.go"
+    common_mistakes:
+      - "Reading a whole Get response into memory instead of streaming response.Body — defeats the reason this package exists over a bare SDK call."
+      - "Passing an absolute key (a leading /): every method requires a bucket-relative path."
+      - "Treating Delete as failing on an already-absent key: S3-compatible DELETE is idempotent, and this client treats 404 as success."
+      - "Building an app-local SigV4 client instead of using this package: a second implementation of the same signing logic is a defect."
+    related_packages: []
+
   testkit:
     name: "github.com/growth-labs/packages-go/testkit"
     summary: "Shared test harness: strict JSON fixture runners, the falsifiable-guard mutation helper (ProveGuard), and a disposable real-PostgreSQL harness."

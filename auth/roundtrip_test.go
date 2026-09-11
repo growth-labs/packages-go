@@ -686,3 +686,44 @@ func isOAuthCode(err error, code string) bool {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestMiddlewareGatedRedirectKeepsQuery(t *testing.T) {
+	client, err := New(Config{
+		Issuer:       "https://auth.example.test",
+		ClientID:     "client",
+		Resource:     "https://consumer.example.test",
+		CallbackPath: "/api/auth/callback",
+		CookiePrefix: "consumer",
+		Providers:    []string{"google"},
+		GatedPaths:   []string{"/devices", "/devices/*"},
+		LoginPath:    "/login",
+		HTTPClient:   &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("issuer offline") })},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) })
+
+	cases := []struct {
+		name     string
+		target   string
+		location string
+	}{
+		{name: "query survives", target: "https://consumer.example.test/devices?pair_state=abc-_", location: "/login?redirect=%2Fdevices%3Fpair_state%3Dabc-_"},
+		{name: "no query unchanged", target: "https://consumer.example.test/devices", location: "/login?redirect=%2Fdevices"},
+		{name: "encoded slash in query falls back to the path", target: "https://consumer.example.test/devices?next=%2Fadmin", location: "/login?redirect=%2Fdevices"},
+		{name: "backslash in query falls back to the path", target: `https://consumer.example.test/devices?next=\evil`, location: "/login?redirect=%2Fdevices"},
+		{name: "fragment never appears", target: "https://consumer.example.test/devices?pair_state=abc#section", location: "/login?redirect=%2Fdevices%3Fpair_state%3Dabc"},
+		{name: "nested path keeps query", target: "https://consumer.example.test/devices/pair?pair_state=abc", location: "/login?redirect=%2Fdevices%2Fpair%3Fpair_state%3Dabc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			response := httptest.NewRecorder()
+			client.Middleware(next).ServeHTTP(response, request)
+			if response.Code != http.StatusFound || response.Header().Get("Location") != tc.location {
+				t.Fatalf("gated response = %d %q, want 302 %q", response.Code, response.Header().Get("Location"), tc.location)
+			}
+		})
+	}
+}

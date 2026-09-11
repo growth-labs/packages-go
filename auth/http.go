@@ -113,7 +113,7 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 			}
 		}
 		if !authenticated && c.isGated(request.URL.Path) {
-			query := url.Values{"redirect": {request.URL.Path}}
+			query := url.Values{"redirect": {gatedRedirectTarget(request)}}
 			http.Redirect(response, request, c.config.LoginPath+"?"+query.Encode(), http.StatusFound)
 			return
 		}
@@ -122,6 +122,22 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+// gatedRedirectTarget is the post-login destination for an unauthenticated
+// request to a gated path: the path plus its query so state-carrying
+// return URLs survive the login round trip. Fragments never travel (the
+// request parser keeps a literal "#" in the raw query, so it is cut here),
+// and a request URI the login handler would reject falls back to the bare path.
+func gatedRedirectTarget(request *http.Request) string {
+	target := request.URL.RequestURI()
+	if index := strings.IndexByte(target, '#'); index >= 0 {
+		target = target[:index]
+	}
+	if !validAbsolutePath(target) {
+		return request.URL.Path
+	}
+	return target
 }
 
 func (c *Client) isAuthRoute(path string) bool {

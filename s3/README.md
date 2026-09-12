@@ -1,7 +1,8 @@
 # s3
 
-Dependency-free SigV4 client for one S3-compatible, path-style bucket: no
-SDK, no vendor lock-in beyond the standard library.
+Dependency-free AWS SigV4 client for one S3-compatible bucket (path-style or
+virtual-hosted addressing; AWS S3 and Cloudflare R2 alike): no SDK, no
+vendor lock-in beyond the standard library.
 
 ```sh
 go get github.com/growth-labs/packages-go/s3
@@ -18,17 +19,18 @@ go get github.com/growth-labs/packages-go/s3
 - Uploading a small, fully-buffered payload — a JSON receipt, a manifest
   (`Put`; SigV4 header auth signs the exact payload hash up front, so it
   needs the complete body anyway).
+- Uploading a large, streamed payload that must survive a dropped
+  connection without re-sending the whole object (`PutStream`: automatic
+  real S3 multipart upload above `MultipartThreshold`, per-part retry,
+  server-side abort on an unrecoverable failure, and a read-back identity
+  check via `Inspect` after every upload).
 
 ## Do not use it for
 
-- Multipart/large-object upload, or a general `ArtifactStore` abstraction
-  (source/target references, publish/inspect semantics): this package is
-  the narrow signed-request primitive, not that layer. `fulcrum-labs/foundry`'s
-  `capabilityplane/object.go` is a fuller client with multipart support that
-  predates this extraction; if that capability is needed here too, extend
-  this package rather than building a second implementation.
-- Anything that isn't path-style addressing (virtual-hosted-style buckets
-  are rejected by `NewClient`).
+- A general `ArtifactStore` abstraction (opaque `object://` reference
+  resolution, capability-dispatch-shaped source/target types): that
+  domain layer belongs in the consumer, built on top of this package's
+  plain bucket-relative-key API, not inside it.
 
 ## Minimal setup
 
@@ -40,6 +42,8 @@ client, err := s3.NewClient(s3.Config{
 }, httpClient)
 
 response, err := client.Get(ctx, "outputs/render/clip.mp4", rangeHeader)
+
+err = client.PutStream(ctx, "outputs/render/clip.mp4", reader, size, sha256Hex)
 ```
 
 See `example_test.go` for the full worked shape.
@@ -53,5 +57,6 @@ See `example_test.go` for the full worked shape.
   bucket-relative path and rejects one that isn't.
 - Treating `Delete` as failing on an already-absent key: S3-compatible
   `DELETE` is idempotent, and this client treats 404 as success to match.
-- Building an app-local SigV4 client instead of using this package: a
-  second implementation of the same signing logic is a defect.
+- Building an app-local SigV4 client, multipart uploader, or
+  `ArtifactStore`-shaped wrapper instead of using/extending this package:
+  a second implementation of the same signing logic is a defect.

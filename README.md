@@ -21,9 +21,10 @@ Current modules:
   pgx transaction helpers.
 - `packaging` — static cross-builds, provenance, checksums, signed manifests,
   systemd, and health-checked symlink-swap deployment.
-- `s3` — dependency-free SigV4 client for one S3-compatible, path-style
-  bucket: streamed Range-forwarding Get, prefix-scoped List/Delete, small-
-  payload Put.
+- `s3` — dependency-free SigV4 client for one S3-compatible bucket
+  (path-style or virtual-hosted): streamed Range-forwarding Get,
+  prefix-scoped List/Delete, small-payload Put, and PutStream (automatic
+  multipart with read-back verification).
 
 The repository and its tagged modules are public. Standard Go module resolution
 uses the public module proxy (`proxy.golang.org`) by default:

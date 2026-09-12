@@ -81,7 +81,7 @@ func TestNewClient_Validation(t *testing.T) {
 		{"missing bucket", func(c *Config) { c.Bucket = "" }},
 		{"missing access key", func(c *Config) { c.AccessKeyID = "" }},
 		{"missing secret key", func(c *Config) { c.SecretAccessKey = "" }},
-		{"virtual-hosted style rejected", func(c *Config) { c.PathStyle = false }},
+		{"invalid bucket name", func(c *Config) { c.Bucket = "AB" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -314,7 +314,7 @@ func TestClient_Put_SignsUploadsBodyAndContentType(t *testing.T) {
 	if string(gotBody) != string(payload) {
 		t.Fatalf("uploaded body = %q, want %q", gotBody, payload)
 	}
-	if gotSignedHeaders != hashHex(string(payload)) {
+	if gotSignedHeaders != mustHashHex(payload) {
 		t.Fatalf("X-Amz-Content-Sha256 = %q, want the real payload hash", gotSignedHeaders)
 	}
 	if !strings.Contains(gotAuth, "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date") {
@@ -337,5 +337,67 @@ func TestClient_Put_RejectsAbsoluteKeyAndEmptyContentType(t *testing.T) {
 	}
 	if err := client.Put(context.Background(), "outputs/quarry/candidates/mission-1.json", []byte("{}"), ""); err == nil {
 		t.Fatal("want error for an empty content type, got nil")
+	}
+}
+
+// TestClient_ObjectURL_SupportsBothAddressingStyles proves foundry's own
+// need (virtual-hosted addressing) works alongside quarry's path-style
+// requirement, both against the same Client type.
+func TestClient_ObjectURL_SupportsBothAddressingStyles(t *testing.T) {
+	pathStyle := testConfig()
+	client, err := NewClient(pathStyle, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := client.objectURL("a/b.mp4").Host, "s3.example.test"; got != want {
+		t.Fatalf("path-style host = %q, want %q", got, want)
+	}
+	if got, want := client.objectURL("a/b.mp4").Path, "/examplebucket/a/b.mp4"; got != want {
+		t.Fatalf("path-style path = %q, want %q", got, want)
+	}
+
+	virtualHosted := testConfig()
+	virtualHosted.PathStyle = false
+	client, err = NewClient(virtualHosted, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := client.objectURL("a/b.mp4").Host, "examplebucket.s3.example.test"; got != want {
+		t.Fatalf("virtual-hosted host = %q, want %q", got, want)
+	}
+	if got, want := client.objectURL("a/b.mp4").Path, "/a/b.mp4"; got != want {
+		t.Fatalf("virtual-hosted path = %q, want %q", got, want)
+	}
+}
+
+// TestClient_ObjectURLEscapesSubDelimsInKey is the regression proof
+// (found live: a key containing ':' failed with SignatureDoesNotMatch
+// because Go's EscapedPath leaves ':' raw while S3/MinIO's canonical
+// URI requires "%3A") that a key with a sub-delimiter is signed and
+// sent with its RFC 3986 escaped form.
+func TestClient_ObjectURLEscapesSubDelimsInKey(t *testing.T) {
+	client, err := NewClient(testConfig(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := client.objectURL("podcast/ingest/podcast-source:abc.def")
+	if got, want := location.EscapedPath(), "/examplebucket/podcast/ingest/podcast-source%3Aabc.def"; got != want {
+		t.Fatalf("escaped path = %q, want %q", got, want)
+	}
+	if got, want := location.Path, "/examplebucket/podcast/ingest/podcast-source:abc.def"; got != want {
+		t.Fatalf("decoded path = %q, want %q", got, want)
+	}
+	request, err := http.NewRequest(http.MethodGet, location.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(request.URL.RequestURI(), "podcast-source%3Aabc.def") {
+		t.Fatalf("wire request URI keeps a raw ':' : %s", request.URL.RequestURI())
+	}
+}
+
+func TestEscapePathSegmentsKeepsSeparatorsAndUnreserved(t *testing.T) {
+	if got, want := escapePathSegments("/b/a-b_c.d~e/x y/q:r"), "/b/a-b_c.d~e/x%20y/q%3Ar"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

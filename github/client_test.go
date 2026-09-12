@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,10 +34,11 @@ type fakeMintServer struct {
 	calls           int32
 	lastPermissions map[string]string
 	lastAuth        string
-	rateRemaining   int
-	statusOverride  int
-	tokenValue      string
-	expiresIn       time.Duration
+	rateRemaining    int
+	statusOverride   int
+	tokenValue       string
+	expiresIn        time.Duration
+	lastBodyHadRepos bool
 }
 
 func newFakeMintServer(t *testing.T) *fakeMintServer {
@@ -50,11 +52,20 @@ func newFakeMintServer(t *testing.T) *fakeMintServer {
 			w.WriteHeader(f.statusOverride)
 			return
 		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var asMap map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &asMap); err != nil {
+			t.Fatalf("decode request body as map: %v", err)
+		}
+		_, f.lastBodyHadRepos = asMap["repositories"]
 		var body struct {
 			Repositories []string          `json:"repositories"`
 			Permissions  map[string]string `json:"permissions"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
 		f.lastPermissions = body.Permissions
@@ -103,6 +114,52 @@ func TestMintInstallationTokenSendsExactlyTheRequestedPermissionsAndAnAppJWT(t *
 	}
 	if !strings.HasPrefix(server.lastAuth, "Bearer ") {
 		t.Fatalf("Authorization header = %q, want a Bearer App JWT", server.lastAuth)
+	}
+	if !server.lastBodyHadRepos {
+		t.Fatal("MintInstallationToken must send a repositories field, not omit it")
+	}
+}
+
+func TestMintInstallationTokenForOwnerOmitsTheRepositoriesFieldEntirely(t *testing.T) {
+	server := newFakeMintServer(t)
+	client := newTestClient(t, server, nil)
+
+	token, err := client.MintInstallationTokenForOwner(context.Background(), 999, "growth-labs", Permissions{"contents": "write"})
+	if err != nil {
+		t.Fatalf("MintInstallationTokenForOwner: %v", err)
+	}
+	if token.Value() != "ghs_faketoken" {
+		t.Fatalf("token value = %q, want the fake server's token", token.Value())
+	}
+	if server.lastBodyHadRepos {
+		t.Fatal("MintInstallationTokenForOwner must omit repositories entirely -- an installation-wide grant, not an implicit empty list")
+	}
+}
+
+func TestMintInstallationTokenForOwnerRequiresAnOwner(t *testing.T) {
+	server := newFakeMintServer(t)
+	client := newTestClient(t, server, nil)
+	if _, err := client.MintInstallationTokenForOwner(context.Background(), 999, "", Permissions{"contents": "write"}); !IsCode(err, CodeInvalidConfig) {
+		t.Fatalf("err = %v, want CodeInvalidConfig", err)
+	}
+	if atomic.LoadInt32(&server.calls) != 0 {
+		t.Fatal("an empty owner reached the network")
+	}
+}
+
+func TestMintInstallationTokenAndMintInstallationTokenForOwnerCacheIndependently(t *testing.T) {
+	server := newFakeMintServer(t)
+	client := newTestClient(t, server, nil)
+	perms := Permissions{"contents": "write"}
+
+	if _, err := client.MintInstallationToken(context.Background(), 1, "growth-labs/packages-go", perms); err != nil {
+		t.Fatalf("MintInstallationToken: %v", err)
+	}
+	if _, err := client.MintInstallationTokenForOwner(context.Background(), 1, "growth-labs", perms); err != nil {
+		t.Fatalf("MintInstallationTokenForOwner: %v", err)
+	}
+	if calls := atomic.LoadInt32(&server.calls); calls != 2 {
+		t.Fatalf("server saw %d calls, want 2 -- a repo-scoped and an owner-wide mint must never collide in the cache", calls)
 	}
 }
 

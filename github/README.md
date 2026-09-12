@@ -54,6 +54,18 @@ if err != nil {
 defer useToken(token.Value())
 ```
 
+## Owner-wide tokens
+
+`MintInstallationTokenForOwner(ctx, installationID, owner, permissions)` mints
+a token scoped to every repository the installation covers, for a caller that
+genuinely spans an unbounded or manifest-derived set of repositories under one
+owner (an estate-wide maintenance campaign, not a caller that happens to touch
+several repos it could instead enumerate). It omits the request's
+`repositories` field entirely rather than sending an empty list, so GitHub
+grants exactly the installation's own configured access -- never broader.
+Prefer `MintInstallationToken`'s single-repo scope whenever the caller touches
+exactly one repository; the two mint calls cache independently.
+
 ## Design
 
 - **Permissions are mandatory and narrow.** `MintInstallationToken` refuses an

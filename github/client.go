@@ -133,17 +133,41 @@ func New(config Config) (*Client, error) {
 // scope when permissions is omitted, which this package refuses to do
 // silently.
 func (c *Client) MintInstallationToken(ctx context.Context, installationID int64, repo string, permissions Permissions) (Token, error) {
-	if installationID <= 0 {
-		return Token{}, errorf(CodeInvalidConfig, "installation id is required")
-	}
 	if strings.TrimSpace(repo) == "" {
 		return Token{}, errorf(CodeInvalidConfig, "repo is required")
+	}
+	return c.mint(ctx, installationID, repo, []string{repositoryName(repo)}, permissions)
+}
+
+// MintInstallationTokenForOwner returns a token scoped to every repository
+// the installation covers under owner (the "repositories" field is omitted
+// from the mint request entirely, so GitHub grants exactly the
+// installation's own configured access -- never broader than whatever the
+// org admin already scoped that installation to). Use this only when an
+// operation genuinely spans an unbounded or manifest-derived set of
+// repositories under one owner (e.g. an estate-wide maintenance campaign);
+// MintInstallationToken's single-repo scope is narrower and should be
+// preferred whenever the caller touches exactly one repository.
+func (c *Client) MintInstallationTokenForOwner(ctx context.Context, installationID int64, owner string, permissions Permissions) (Token, error) {
+	if strings.TrimSpace(owner) == "" {
+		return Token{}, errorf(CodeInvalidConfig, "owner is required")
+	}
+	return c.mint(ctx, installationID, "owner:"+owner, nil, permissions)
+}
+
+// mint is the shared budgeted-mint path: cacheLabel identifies the cache/
+// dedupe entry (a repo full name for MintInstallationToken, "owner:<name>"
+// for MintInstallationTokenForOwner); repos is the exact "repositories"
+// request field, nil meaning omit it (installation-wide).
+func (c *Client) mint(ctx context.Context, installationID int64, cacheLabel string, repos []string, permissions Permissions) (Token, error) {
+	if installationID <= 0 {
+		return Token{}, errorf(CodeInvalidConfig, "installation id is required")
 	}
 	if len(permissions) == 0 {
 		return Token{}, errorf(CodeInvalidPermissions, "at least one permission is required -- an unscoped mint is refused")
 	}
 
-	cacheKey := fmt.Sprintf("%d|%s|%s", installationID, repo, permissions.key())
+	cacheKey := fmt.Sprintf("%d|%s|%s", installationID, cacheLabel, permissions.key())
 
 	c.mu.Lock()
 	if cached, ok := c.tokens[cacheKey]; ok && !cached.Expired(c.now(), time.Minute) {
@@ -153,7 +177,7 @@ func (c *Client) MintInstallationToken(ctx context.Context, installationID int64
 	if c.dedupeWindow > 0 {
 		if last, ok := c.dedupe[cacheKey]; ok && c.now().Sub(last) < c.dedupeWindow {
 			c.mu.Unlock()
-			return Token{}, errorf(CodeDuplicateRead, "identical mint for installation %d repo %s rejected within the %s dedupe window", installationID, repo, c.dedupeWindow)
+			return Token{}, errorf(CodeDuplicateRead, "identical mint for installation %d %s rejected within the %s dedupe window", installationID, cacheLabel, c.dedupeWindow)
 		}
 	}
 	if c.callsMade >= c.callBudget {
@@ -169,7 +193,7 @@ func (c *Client) MintInstallationToken(ctx context.Context, installationID int64
 	c.callsMade++
 	c.mu.Unlock()
 
-	token, err := c.mintFresh(ctx, installationID, repo, permissions)
+	token, err := c.mintFresh(ctx, installationID, cacheLabel, repos, permissions)
 	if err != nil {
 		// The dedupe entry armed above exists to reject a caller's own
 		// repeated/looping duplicate request, not to punish a transient
@@ -194,17 +218,17 @@ func (c *Client) MintInstallationToken(ctx context.Context, installationID int64
 	return token, nil
 }
 
-func (c *Client) mintFresh(ctx context.Context, installationID int64, repo string, permissions Permissions) (Token, error) {
+func (c *Client) mintFresh(ctx context.Context, installationID int64, cacheLabel string, repos []string, permissions Permissions) (Token, error) {
 	appJWT, err := signAppJWT(c.appID, c.key, c.now())
 	if err != nil {
 		return Token{}, err
 	}
 
 	body, err := json.Marshal(struct {
-		Repositories []string          `json:"repositories"`
+		Repositories []string          `json:"repositories,omitempty"`
 		Permissions  map[string]string `json:"permissions"`
 	}{
-		Repositories: []string{repositoryName(repo)},
+		Repositories: repos,
 		Permissions:  permissions,
 	})
 	if err != nil {
@@ -260,7 +284,7 @@ func (c *Client) mintFresh(ctx context.Context, installationID int64, repo strin
 
 	return Token{
 		value:        decoded.Token,
-		Repo:         repo,
+		Repo:         cacheLabel,
 		Permissions:  permissions.clone(),
 		Installation: installationID,
 		MintedAt:     c.now(),

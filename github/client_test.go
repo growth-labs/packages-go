@@ -164,6 +164,36 @@ func TestMintInstallationTokenRejectsAnIdenticalMintWithinTheDedupeWindowAfterCa
 	}
 }
 
+func TestMintInstallationTokenClearsItsDedupeEntryAfterATransientFailureSoAnImmediateRetryCanSucceed(t *testing.T) {
+	server := newFakeMintServer(t)
+	server.statusOverride = http.StatusInternalServerError
+	client := newTestClient(t, server, func(c *Config) {
+		c.DedupeWindow = time.Hour
+	})
+	perms := Permissions{"contents": "write"}
+
+	_, err := client.MintInstallationToken(context.Background(), 1, "repo-a", perms)
+	if !IsCode(err, CodeUnexpectedResponse) {
+		t.Fatalf("first mint err = %v, want CodeUnexpectedResponse (a transient transport failure)", err)
+	}
+
+	// The server recovers; an immediate identical retry must reach the
+	// network again, not be told CodeDuplicateRead -- that code would mask
+	// the real (transport) cause behind a guard that never actually saw a
+	// successful prior mint to be a duplicate of.
+	server.statusOverride = 0
+	token, err := client.MintInstallationToken(context.Background(), 1, "repo-a", perms)
+	if err != nil {
+		t.Fatalf("retry after a transient failure err = %v, want success", err)
+	}
+	if token.Value() != "ghs_faketoken" {
+		t.Fatalf("retry token = %q, want the fake server's token", token.Value())
+	}
+	if calls := atomic.LoadInt32(&server.calls); calls != 2 {
+		t.Fatalf("server saw %d calls, want 2 -- the retry must have actually reached the network", calls)
+	}
+}
+
 func TestMintInstallationTokenStopsAtItsCallBudget(t *testing.T) {
 	server := newFakeMintServer(t)
 	client := newTestClient(t, server, func(c *Config) {

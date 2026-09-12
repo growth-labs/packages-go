@@ -39,8 +39,12 @@ if err != nil {
     case github.IsCode(err, github.CodeRateLimited):
         // back off; do not retry immediately
     case github.IsCode(err, github.CodeDuplicateRead):
-        // an identical mint was already made inside the dedupe window --
-        // reuse its result rather than minting again
+        // an identical mint was already attempted inside the dedupe window
+        // and no live token is cached for it (a cache hit is served before
+        // this check ever runs) -- wait out the window rather than
+        // retrying immediately; a failed attempt clears its own dedupe
+        // entry, so this fires only for a caller's own repeated/looping
+        // request, never as a side effect of a prior transient failure
     }
     return err
 }

@@ -164,12 +164,27 @@ func (c *Client) MintInstallationToken(ctx context.Context, installationID int64
 		c.mu.Unlock()
 		return Token{}, errorf(CodeRateLimited, "installation rate limit remaining (%d) below the configured floor (%d)", c.rateRemaining, c.rateLimitFloor)
 	}
-	c.dedupe[cacheKey] = c.now()
+	armedAt := c.now()
+	c.dedupe[cacheKey] = armedAt
 	c.callsMade++
 	c.mu.Unlock()
 
 	token, err := c.mintFresh(ctx, installationID, repo, permissions)
 	if err != nil {
+		// The dedupe entry armed above exists to reject a caller's own
+		// repeated/looping duplicate request, not to punish a transient
+		// transport failure for the rest of the window -- clearing it here
+		// lets an immediate legitimate retry reach mintFresh again instead
+		// of getting CodeDuplicateRead, which would mask the real
+		// (transport-class) cause for up to DedupeWindow. Only clear the
+		// entry this call itself armed: a concurrent call that legitimately
+		// re-armed the same key after this one failed must not have its own
+		// dedupe guard erased out from under it.
+		c.mu.Lock()
+		if current, ok := c.dedupe[cacheKey]; ok && current.Equal(armedAt) {
+			delete(c.dedupe, cacheKey)
+		}
+		c.mu.Unlock()
 		return Token{}, err
 	}
 

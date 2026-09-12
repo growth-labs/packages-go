@@ -54,7 +54,10 @@ func sortStrings(s []string) {
 // process's environment or an HTTP client, never to a log line or a
 // capability_runs receipt.
 type Token struct {
-	value       string
+	value string
+	// Repo is an identity label, not a validated field: the full repo
+	// name for MintInstallationToken, or "owner:<name>" for
+	// MintInstallationTokenForOwner's installation-wide grant.
 	Repo        string
 	Permissions Permissions
 	Installation int64

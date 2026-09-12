@@ -129,6 +129,28 @@ packages:
       - "Building an app-local SigV4 client, multipart uploader, or ArtifactStore-shaped wrapper instead of using/extending this package: a second implementation of the same signing logic is a defect."
     related_packages: []
 
+  sidecar:
+    name: "github.com/growth-labs/packages-go/sidecar"
+    summary: "Dependency-free reader/validator for the WH-08 sidecar cut record (component-cut.json): store, kind, cut identity, capturedAt, schema version, writer generation, control-log sequence/hash, cross-store cursors, and the encrypted-owner-cut ciphertext identity/recipients/plaintext-file inventory."
+    stability: experimental
+    use_when:
+      - "A Go service needs to read a sidecar store's own cut record off disk to check its freshness against a recovery-point objective (an owner's freshness tripwire)."
+      - "A Go service needs to read back a shipped or handed-off cut's record to verify what it claims about itself (store, kind, schema version, writer generation, cursors) before trusting or importing it."
+    do_not_use_when:
+      - "You need to capture a sidecar (VACUUM INTO a live store, copy its control log, encrypt it, manage a handoff directory): that capture/write side stays in fulcrum-labs/foundry's backup package, which this module has no opinion on."
+      - "You need a general backup-manifest or product-backup-vector type: this package is scoped to one sidecar store's cut record, not the wider manifest naming every backup vector."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/sidecar"
+      - "record, err := sidecar.Parse(payload) // payload is component-cut.json's bytes"
+      - "capturedAt, err := record.CapturedAtTime(); withinObjective := time.Since(capturedAt) <= objective"
+    required_env: []
+    working_example_path: "sidecar/example_test.go"
+    common_mistakes:
+      - "Reimplementing a narrow read-only subset of this exact JSON shape in a new consumer instead of depending on this package — the second known instance of that (fulcrum-labs/quarry's sidecarfreshness) is why this package exists."
+      - "Treating record.CapturedAt as pre-validated: read it through CapturedAtTime(), which fails loud on empty or unparseable values instead of silently returning the zero time."
+      - "Constructing a CutRecord by hand for Encrypted=true without CiphertextSHA256/CiphertextBytes/Recipients, or setting any of those without Encrypted=true: Validate rejects both as a shape the real writer never produces."
+    related_packages: []
+
   testkit:
     name: "github.com/growth-labs/packages-go/testkit"
     summary: "Shared test harness: strict JSON fixture runners, the falsifiable-guard mutation helper (ProveGuard), and a disposable real-PostgreSQL harness."

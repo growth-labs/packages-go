@@ -1,0 +1,26 @@
+{
+  "store": "quarry",
+  "kind": "handoff",
+  "cut": "cut-3f9a1b2c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+  "capturedAt": "2026-09-12T07:05:00Z",
+  "schemaVersion": 11,
+  "writerGeneration": 4,
+  "controlLogSha256": "8843d7f92416211de9ebb963ff4ce28125932878d7b3da6f533f1ffe4a1a6bc",
+  "controlLogSeq": 128,
+  "cursors": {
+    "writer_generation": 4,
+    "authority.capability_terminals_observed": 512
+  },
+  "encrypted": true,
+  "ciphertextSha256": "1220e5c9b0f7d5c3f8b6c1e2a9d4f7b3c5e8a1d6f9b2c4e7a0d3f6b9c2e5a8d1",
+  "ciphertextBytes": 4718592,
+  "recipients": [
+    "recipient-key-01",
+    "recipient-key-02"
+  ],
+  "plaintextFiles": [
+    { "path": "store.sqlite", "bytes": 4194304, "sha256": "2b6b5a1c8e3f704192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80" },
+    { "path": "control-log.jsonl", "bytes": 524288, "sha256": "9c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d" },
+    { "path": "cursors.json", "bytes": 64, "sha256": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5" }
+  ]
+}

@@ -25,6 +25,10 @@ Current modules:
   (path-style or virtual-hosted): streamed Range-forwarding Get,
   prefix-scoped List/Delete, small-payload Put, and PutStream (automatic
   multipart with read-back verification).
+- `sidecar` — dependency-free reader/validator for the WH-08 sidecar cut
+  record (`component-cut.json`): store, kind, cut identity, capturedAt,
+  schema version, writer generation, control-log sequence/hash, cross-store
+  cursors, and the encrypted-owner-cut ciphertext identity/recipients.
 
 The repository and its tagged modules are public. Standard Go module resolution
 uses the public module proxy (`proxy.golang.org`) by default:

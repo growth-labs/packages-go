@@ -59,6 +59,30 @@ packages:
       - "Treating a successful Send as delivery proof: it is API acceptance, and VerifyDelivered is the sender-side evidence."
     related_packages: ["testkit"]
 
+  github:
+    name: "github.com/growth-labs/packages-go/github"
+    summary: "GitHub App installation-token minter for Go services: RS256 App JWT signing, per-call narrowly-scoped tokens (never the installation's full default grant), a budgeted client (call cap, duplicate-read dedupe, rate_limit preflight), and a two-class configuration/transport error taxonomy — no SDK, no third-party JWT/RSA dependency."
+    stability: experimental
+    use_when:
+      - "A Go service authenticating as a GitHub App needs a short-lived token scoped to exactly one repository and permission set for one operation (a PR, a commit status, a settings change)."
+      - "A caller needs to bound its own GitHub API usage against a shared installation's rate limit (a call budget, duplicate-read rejection, a rate_limit preflight) rather than trusting every caller to self-limit."
+    do_not_use_when:
+      - "A runner or an interactive shim needs to hold the App private key itself: this package is authority-only by design (WH-05b) — a runner receives an already-minted token through the runner protocol's secret handoff or the operator API's installation-token route, never this package directly."
+      - "You need a full GitHub REST/GraphQL client: this package mints tokens only; issue calls with net/http or another client using the minted Token.Value()."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/github"
+      - "client, err := github.New(github.Config{AppID, PrivateKeyPEM}) // PrivateKeyPEM from a vault-delivered file, never a repo secret"
+      - "token, err := client.MintInstallationToken(ctx, installationID, repo, github.Permissions{\"contents\": \"write\"})"
+      - "child process env: GITHUB_TOKEN=token.Value() — never logged, never placed in a receipt"
+    required_env: []
+    working_example_path: "github/example_test.go"
+    common_mistakes:
+      - "Calling MintInstallationToken with an empty Permissions map expecting the installation's default grant: it is refused (CodeInvalidPermissions) rather than silently widened."
+      - "Logging or receipting a Token: String()/GoString() redact it on purpose — read the value only through Token.Value(), and only to hand it to a child process's environment or an HTTP client."
+      - "Minting the App private key onto a runner host: the design keeps the key on the authority only; a runner is handed an already-minted token."
+      - "Retrying a CodeDuplicateRead or CodeCallBudgetExhausted failure immediately: both mean the budget/dedupe guard did its job, not that the call transiently failed."
+    related_packages: []
+
   packaging:
     name: "github.com/growth-labs/packages-go/packaging"
     summary: "Fleet packaging and deployment conventions for Go services: static cross-builds with provenance, portable checksums, signed artifact manifests, hardened systemd units, and health-checked symlink-swap deployment with rollback."

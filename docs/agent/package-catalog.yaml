@@ -125,7 +125,7 @@ packages:
     common_mistakes:
       - "Reading a whole Get response into memory instead of streaming response.Body — defeats the reason this package exists over a bare SDK call."
       - "Passing an absolute key (a leading /): every method requires a bucket-relative path."
-      - "Treating Delete as failing on an already-absent key: S3-compatible DELETE is idempotent, and this client treats 404 as success."
+      - "Treating Delete as failing on an already-absent key — S3-compatible DELETE is idempotent, and this client treats 404 as success."
       - "Building an app-local SigV4 client, multipart uploader, or ArtifactStore-shaped wrapper instead of using/extending this package: a second implementation of the same signing logic is a defect."
     related_packages: []
 

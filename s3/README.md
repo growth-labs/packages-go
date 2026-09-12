@@ -55,7 +55,7 @@ See `example_test.go` for the full worked shape.
   SDK call.
 - Passing an absolute key (a leading `/`) — every method requires a
   bucket-relative path and rejects one that isn't.
-- Treating `Delete` as failing on an already-absent key: S3-compatible
+- Treating `Delete` as failing on an already-absent key — S3-compatible
   `DELETE` is idempotent, and this client treats 404 as success to match.
 - Building an app-local SigV4 client, multipart uploader, or
   `ArtifactStore`-shaped wrapper instead of using/extending this package:

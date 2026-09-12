@@ -8,5 +8,6 @@ use (
 	./packaging
 	./pg
 	./s3
+	./sidecar
 	./testkit
 )

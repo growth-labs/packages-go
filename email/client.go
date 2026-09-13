@@ -168,11 +168,18 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 	if err != nil {
 		return "", err
 	}
-	if err := requireCreated(responses, "e1", "Email/set", "outgoingEmail"); err != nil {
-		return "", err
+	draftErr := requireCreated(responses, "e1", "Email/set", "outgoingEmail")
+	submissionErr := requireCreated(responses, "s1", "EmailSubmission/set", "outgoingSubmission")
+	// Each method in a JMAP batch runs independently (RFC 8620 section 3.6).
+	// A draft rejection cannot prove what happened to the actual submission.
+	if submissionErr != nil {
+		if IsUnsubmitted(submissionErr) && IsUnsubmitted(draftErr) && IsRateLimited(draftErr) {
+			return "", draftErr
+		}
+		return "", submissionErr
 	}
-	if err := requireCreated(responses, "s1", "EmailSubmission/set", "outgoingSubmission"); err != nil {
-		return "", err
+	if draftErr != nil {
+		return "", errors.New("fastmail: draft result conflicts with accepted submission")
 	}
 	return messageID, nil
 }
@@ -336,6 +343,9 @@ func (c *Client) fetchSession(ctx context.Context) (jmapSession, error) {
 		return jmapSession{}, fmt.Errorf("fastmail: session request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return jmapSession{}, &RateLimitError{StatusCode: resp.StatusCode, RetryAfter: retryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return jmapSession{}, fmt.Errorf("fastmail: session request returned http %d", resp.StatusCode)
 	}
@@ -370,6 +380,11 @@ func (c *Client) call(ctx context.Context, apiURL string, methodCalls ...[]any) 
 		return nil, fmt.Errorf("fastmail: API request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// RFC 8620 section 3.6: an HTTP rate-limit error rejects the entire
+		// request, unlike a method/record error within an accepted batch.
+		return nil, Unsubmitted(&RateLimitError{StatusCode: resp.StatusCode, RetryAfter: retryAfter(resp.Header.Get("Retry-After"))})
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("fastmail: API request returned http %d", resp.StatusCode)
 	}
@@ -384,10 +399,15 @@ func (c *Client) call(ctx context.Context, apiURL string, methodCalls ...[]any) 
 // requires its method name to match (a JMAP error response substitutes
 // "error" for the name), and decodes its arguments object into out.
 func unmarshalMethodResult(responses []json.RawMessage, callID, wantName string, out any) error {
+	var result json.RawMessage
+	var resultName string
 	for _, raw := range responses {
-		var entry [3]json.RawMessage
+		var entry []json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil {
-			continue
+			return fmt.Errorf("fastmail: malformed method response for %q", callID)
+		}
+		if len(entry) != 3 {
+			return fmt.Errorf("fastmail: malformed method response for %q", callID)
 		}
 		var id string
 		if err := json.Unmarshal(entry[2], &id); err != nil || id != callID {
@@ -397,10 +417,27 @@ func unmarshalMethodResult(responses []json.RawMessage, callID, wantName string,
 		if err := json.Unmarshal(entry[0], &name); err != nil {
 			return fmt.Errorf("fastmail: malformed method response for %q", callID)
 		}
-		if name != wantName {
-			return fmt.Errorf("fastmail: %s call failed: %s", wantName, string(entry[1]))
+		// Submission/set can emit an implicit Email/set with the same call
+		// id. Only the requested method or its error is its direct result.
+		if name != wantName && name != "error" {
+			continue
 		}
-		return json.Unmarshal(entry[1], out)
+		if result != nil {
+			return fmt.Errorf("fastmail: duplicate method response for %q", callID)
+		}
+		result, resultName = entry[1], name
+	}
+	if resultName == "error" {
+		var failure struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(result, &failure) == nil && failure.Type == "rateLimit" {
+			return &RateLimitError{Method: wantName}
+		}
+		return fmt.Errorf("fastmail: %s call failed", wantName)
+	}
+	if result != nil {
+		return json.Unmarshal(result, out)
 	}
 	return fmt.Errorf("fastmail: no response for call %q", callID)
 }
@@ -409,18 +446,40 @@ func unmarshalMethodResult(responses []json.RawMessage, callID, wantName string,
 // "created" map, surfacing "notCreated" (or any other rejection) as an error.
 func requireCreated(responses []json.RawMessage, callID, methodName, creationID string) error {
 	var result struct {
-		Created    map[string]any `json:"created"`
-		NotCreated map[string]any `json:"notCreated"`
+		Created    map[string]json.RawMessage `json:"created"`
+		NotCreated map[string]json.RawMessage `json:"notCreated"`
 	}
 	if err := unmarshalMethodResult(responses, callID, methodName, &result); err != nil {
+		if IsRateLimited(err) {
+			return Unsubmitted(err)
+		}
 		return err
 	}
-	if _, ok := result.Created[creationID]; ok {
+	created, didCreate := result.Created[creationID]
+	reason, rejected := result.NotCreated[creationID]
+	if didCreate && rejected {
+		return fmt.Errorf("fastmail: %s returned conflicting creation results", methodName)
+	}
+	if didCreate {
+		var record struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(created, &record) != nil || record.ID == "" {
+			return fmt.Errorf("fastmail: %s returned malformed creation result", methodName)
+		}
 		return nil
 	}
-	if reason, ok := result.NotCreated[creationID]; ok {
-		data, _ := json.Marshal(reason)
-		return Unsubmitted(fmt.Errorf("fastmail: %s did not create %q: %s", methodName, creationID, string(data)))
+	if rejected {
+		var failure struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(reason, &failure) != nil || failure.Type == "" || failure.Type == "serverPartialFail" {
+			return fmt.Errorf("fastmail: %s returned ambiguous creation failure", methodName)
+		}
+		if failure.Type == "rateLimit" {
+			return Unsubmitted(&RateLimitError{Method: methodName})
+		}
+		return Unsubmitted(fmt.Errorf("fastmail: %s did not create %q", methodName, creationID))
 	}
 	return fmt.Errorf("fastmail: %s reported neither created nor notCreated for %q", methodName, creationID)
 }

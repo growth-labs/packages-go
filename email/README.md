@@ -40,9 +40,18 @@ delivered, err := client.VerifyDelivered(ctx, messageID, 2*time.Minute)
   `@fulcrum-labs.com` identity and fails loudly if the account has none; it
   never falls back to "the first identity".
 - **Retry safety is evidence-based.** `IsUnsubmitted(err)` is true only when
-  the transport is proven to have rejected the message. A lost response is
+  the transport proves no message was submitted. A lost response is
   deliberately *not* marked: it may already have been delivered, so retrying
-  it automatically would double-send.
+  it automatically would double-send. Permanent validation errors can also
+  be unsubmitted; retrying them unchanged will not help.
+- **Rate limits have typed evidence.** A bounded retry policy can require
+  `email.IsUnsubmitted(err) && email.IsRateLimited(err)`. Use `errors.As` with
+  `*email.RateLimitError` for `StatusCode`, `Method`, and the `RetryAfter`
+  duration (HTTP seconds/date, capped at 24 hours; zero means absent, invalid,
+  or elapsed). No provider description is included in the rate-limit error.
+  HTTP 429 rejects the whole request; a JMAP `rateLimit` rejection must also
+  leave the actual submission proven unsubmitted. A draft rejection alone
+  cannot override a missing, partial, or contradictory submission result.
 - **The token file is a guard.** `LoadTokenFile` requires a regular
   mode-0600 file holding exactly one line.
 - **Message-ID is caller-owned.** `Send` mints one so the caller can prove
@@ -50,6 +59,11 @@ delivered, err := client.VerifyDelivered(ctx, messageID, 2*time.Minute)
   attempts. Header injection through it is rejected.
 
 Every one of those guards is proven falsifiable in `guards_test.go`.
+Rate-limit classification and ambiguous submission boundaries are exercised
+through the real client against a synthetic JMAP server in `client_test.go`.
+Protocol basis: [RFC 8620 errors and SetError](https://www.rfc-editor.org/rfc/rfc8620.html#section-3.6),
+[HTTP 429](https://www.rfc-editor.org/rfc/rfc6585.html#section-4), and
+[Fastmail's JMAP support](https://www.fastmail.com/dev/).
 
 ## Configuration
 

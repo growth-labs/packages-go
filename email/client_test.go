@@ -3,6 +3,8 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +40,11 @@ type fakeJMAPServer struct {
 	draftOnly           bool
 	dropSubmitResponse  bool
 	gotQuery            map[string]any
+	sessionStatus       int
+	discoveryStatus     int
+	submitStatus        int
+	retryAfter          string
+	submitResponse      string
 }
 
 func newFakeJMAPServer(t *testing.T) *fakeJMAPServer {
@@ -45,6 +52,11 @@ func newFakeJMAPServer(t *testing.T) *fakeJMAPServer {
 	fake := &fakeJMAPServer{identityEmail: "alerts@fulcrum-labs.com"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/jmap/session", func(w http.ResponseWriter, r *http.Request) {
+		if fake.sessionStatus != 0 {
+			w.Header().Set("Retry-After", fake.retryAfter)
+			w.WriteHeader(fake.sessionStatus)
+			return
+		}
 		fake.gotAuth = append(fake.gotAuth, r.Header.Get("Authorization"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"apiUrl":          fake.server.URL + "/jmap/api",
@@ -61,6 +73,11 @@ func newFakeJMAPServer(t *testing.T) *fakeJMAPServer {
 		firstName, _ := req.MethodCalls[0][0].(string)
 		switch firstName {
 		case "Identity/get":
+			if fake.discoveryStatus != 0 {
+				w.Header().Set("Retry-After", fake.retryAfter)
+				w.WriteHeader(fake.discoveryStatus)
+				return
+			}
 			identities := []any{
 				map[string]any{"id": "identity-personal", "email": "grant@grizzle.work"},
 			}
@@ -81,6 +98,15 @@ func newFakeJMAPServer(t *testing.T) *fakeJMAPServer {
 				},
 			})
 		case "Email/set":
+			if fake.submitStatus != 0 {
+				w.Header().Set("Retry-After", fake.retryAfter)
+				w.WriteHeader(fake.submitStatus)
+				return
+			}
+			if fake.submitResponse != "" {
+				_, _ = w.Write([]byte(fake.submitResponse))
+				return
+			}
 			if fake.dropSubmitResponse {
 				conn, _, err := w.(http.Hijacker).Hijack()
 				if err != nil {
@@ -114,7 +140,9 @@ func newFakeJMAPServer(t *testing.T) *fakeJMAPServer {
 				}
 			}
 			submissionResult := map[string]any{"created": map[string]any{"outgoingSubmission": map[string]any{"id": "sub1"}}}
-			if fake.failSubmit {
+			if fake.rejectCreate {
+				submissionResult = map[string]any{"notCreated": map[string]any{"outgoingSubmission": map[string]any{"type": "invalidProperties"}}}
+			} else if fake.failSubmit {
 				submissionResult = map[string]any{"notCreated": map[string]any{"outgoingSubmission": map[string]any{"type": "forbidden"}}}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -388,5 +416,163 @@ func TestUnsubmittedIsNilSafe(t *testing.T) {
 	}
 	if IsUnsubmitted(nil) {
 		t.Fatal("IsUnsubmitted(nil) must be false")
+	}
+}
+
+// These fixtures exercise Send's real HTTP/JMAP boundary. Removing typed
+// evidence or treating any draft rejection as safe must fail this test.
+func TestSendRateLimitEvidence(t *testing.T) {
+	const draftOK = `["Email/set",{"created":{"outgoingEmail":{"id":"e"}}},"e1"]`
+	const draftLimited = `["Email/set",{"notCreated":{"outgoingEmail":{"type":"rateLimit"}}},"e1"]`
+	const submitLimited = `["EmailSubmission/set",{"notCreated":{"outgoingSubmission":{"type":"rateLimit","description":"private provider text"}}},"s1"]`
+	const submitInvalid = `["EmailSubmission/set",{"notCreated":{"outgoingSubmission":{"type":"invalidProperties"}}},"s1"]`
+	const submitPartial = `["error",{"type":"serverPartialFail","description":"rateLimit 429"},"s1"]`
+	const submitOK = `["EmailSubmission/set",{"created":{"outgoingSubmission":{"id":"s"}}},"s1"]`
+	for _, tc := range []struct {
+		name          string
+		responses     string
+		status        int
+		phase         string
+		limited, safe bool
+		method        string
+	}{
+		{name: "session 429", status: 429, phase: "session", limited: true, safe: true},
+		{name: "discovery 429", status: 429, phase: "discovery", limited: true, safe: true},
+		{name: "submit 429", status: 429, limited: true, safe: true},
+		{name: "submit 503", status: 503},
+		{name: "submission creation limited", responses: draftOK + "," + submitLimited, limited: true, safe: true, method: "EmailSubmission/set"},
+		{name: "submission method limited", responses: draftOK + `,["error",{"type":"rateLimit"},"s1"]`, limited: true, safe: true, method: "EmailSubmission/set"},
+		{name: "draft limited submission rejected", responses: draftLimited + "," + submitInvalid, limited: true, safe: true, method: "Email/set"},
+		{name: "draft limited missing submission", responses: draftLimited},
+		{name: "draft limited partial submission", responses: draftLimited + "," + submitPartial},
+		{name: "draft limited successful submission", responses: draftLimited + "," + submitOK},
+		{name: "permanent validation", responses: draftOK + "," + submitInvalid, safe: true},
+		{name: "partial submission", responses: draftOK + "," + submitPartial},
+		{name: "malformed rate limit", responses: draftOK + `,["error",{"type":429},"s1"]`},
+		{name: "contradictory submission", responses: draftOK + `,["EmailSubmission/set",{"created":{"outgoingSubmission":{"id":"s"}},"notCreated":{"outgoingSubmission":{"type":"rateLimit"}}},"s1"]`},
+		{name: "duplicate submission", responses: draftOK + "," + submitLimited + "," + submitOK},
+		{name: "extra tuple element", responses: draftOK + `,["error",{"type":"rateLimit"},"s1","extra"]`},
+		{name: "malformed submission rejection", responses: draftOK + `,["EmailSubmission/set",{"notCreated":{"outgoingSubmission":null}},"s1"]`},
+		{name: "partial record failure", responses: draftOK + `,["EmailSubmission/set",{"notCreated":{"outgoingSubmission":{"type":"serverPartialFail"}}},"s1"]`},
+		{name: "lost response", phase: "lost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeJMAPServer(t)
+			fake.retryAfter = "120"
+			switch tc.phase {
+			case "session":
+				fake.sessionStatus = tc.status
+			case "discovery":
+				fake.discoveryStatus = tc.status
+			case "lost":
+				fake.dropSubmitResponse = true
+			default:
+				fake.submitStatus = tc.status
+			}
+			if tc.responses != "" {
+				fake.submitResponse = `{"methodResponses":[` + tc.responses + `]}`
+			}
+			_, err := fake.client(t).SendWithMessageID(context.Background(), []string{"recipient@example.test"}, "subject", "body", "stable@example.test")
+			if err == nil {
+				t.Fatal("expected failure")
+			}
+			err = fmt.Errorf("caller context: %w", err)
+			if IsRateLimited(err) != tc.limited || IsUnsubmitted(err) != tc.safe {
+				t.Fatalf("limited=%v safe=%v, want %v %v: %v", IsRateLimited(err), IsUnsubmitted(err), tc.limited, tc.safe, err)
+			}
+			if strings.Contains(err.Error(), "private provider text") {
+				t.Fatal("provider description leaked")
+			}
+			if tc.limited {
+				var evidence *RateLimitError
+				if !errors.As(err, &evidence) {
+					t.Fatal("typed evidence lost through wrappers")
+				}
+				if evidence.StatusCode != tc.status || evidence.Method != tc.method {
+					t.Fatalf("unexpected metadata: %+v", evidence)
+				}
+				if tc.status == 429 && evidence.RetryAfter != 120*time.Second {
+					t.Fatalf("RetryAfter=%v", evidence.RetryAfter)
+				}
+			}
+		})
+	}
+}
+
+func TestRateLimitRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+	}{
+		{"", 0}, {"bogus", 0}, {"-1", 0}, {"1.5", 0}, {"0", 0}, {"60", time.Minute},
+		{"999999999999999999999999999", 0}, {"86401", 24 * time.Hour},
+		{"Sun, 06 Nov 1994 08:49:37 GMT", 0},
+	} {
+		t.Run(tc.header, func(t *testing.T) {
+			fake := newFakeJMAPServer(t)
+			fake.submitStatus, fake.retryAfter = 429, tc.header
+			_, err := fake.client(t).Send(context.Background(), []string{"recipient@example.test"}, "subject", "body")
+			var evidence *RateLimitError
+			if !errors.As(err, &evidence) || evidence.RetryAfter != tc.want {
+				t.Fatalf("error=%v evidence=%+v want=%v", err, evidence, tc.want)
+			}
+		})
+	}
+	t.Run("HTTP date", func(t *testing.T) {
+		fake := newFakeJMAPServer(t)
+		fake.submitStatus, fake.retryAfter = 429, time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)
+		_, err := fake.client(t).Send(context.Background(), []string{"recipient@example.test"}, "subject", "body")
+		var evidence *RateLimitError
+		if !errors.As(err, &evidence) || evidence.RetryAfter < 59*time.Minute || evidence.RetryAfter > time.Hour {
+			t.Fatalf("unexpected date evidence: %v", err)
+		}
+	})
+}
+
+func TestRateLimitRequiresTypedEvidence(t *testing.T) {
+	if IsRateLimited(nil) || IsRateLimited(Unsubmitted(errors.New("rateLimit http 429"))) {
+		t.Fatal("human text is not evidence")
+	}
+	cause := errors.New("cause")
+	if !errors.Is(Unsubmitted(cause), cause) {
+		t.Fatal("Unsubmitted lost wrapped cause")
+	}
+}
+
+func TestSendReconcilesImplicitSubmissionUpdate(t *testing.T) {
+	const draft = `["Email/set",{"created":{"outgoingEmail":{"id":"e"}}},"e1"]`
+	const rejected = `["EmailSubmission/set",{"notCreated":{"outgoingSubmission":{"type":"rateLimit"}}},"s1"]`
+	const accepted = `["EmailSubmission/set",{"created":{"outgoingSubmission":{"id":"s"}}},"s1"]`
+	for _, tc := range []struct {
+		name, submission, implicit string
+		wantSuccess, wantSafe      bool
+	}{
+		{"rejection with successful update", rejected, `{"updated":{"e":null}}`, false, false},
+		{"rejection with attempted update", rejected, `{"notUpdated":{"e":{"type":"forbidden"}}}`, false, false},
+		{"rejection with unexpected create", rejected, `{"created":{"other":{"id":"e2"}}}`, false, false},
+		{"rejection with attempted create", rejected, `{"notCreated":{"other":{"type":"forbidden"}}}`, false, false},
+		{"rejection with unexpected destroy", rejected, `{"destroyed":["e"]}`, false, false},
+		{"rejection with attempted destroy", rejected, `{"notDestroyed":{"e":{"type":"forbidden"}}}`, false, false},
+		{"method rejection with successful update", `["error",{"type":"rateLimit"},"s1"]`, `{"updated":{"e":null}}`, false, false},
+		{"rejection with malformed update", rejected, `{"updated":"unknown"}`, false, false},
+		{"rejection with null implicit result", rejected, `null`, false, false},
+		{"rejection with empty implicit result", rejected, `{"updated":null,"notUpdated":{}}`, false, true},
+		{"accepted with successful update", accepted, `{"updated":{"e":null}}`, true, false},
+		{"accepted with failed mailbox update", accepted, `{"notUpdated":{"e":{"type":"forbidden"}}}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeJMAPServer(t)
+			fake.submitResponse = `{"methodResponses":[` + draft + `,` + tc.submission + `,["Email/set",` + tc.implicit + `,"s1"]]}`
+			id, err := fake.client(t).SendWithMessageID(context.Background(), []string{"recipient@example.test"}, "subject", "body", "stable@example.test")
+			if tc.wantSuccess {
+				if err != nil || id != "stable@example.test" {
+					t.Fatalf("valid submission failed: id=%q error=%v", id, err)
+				}
+				return
+			}
+			if err == nil || IsUnsubmitted(err) != tc.wantSafe || IsRateLimited(err) != tc.wantSafe {
+				t.Fatalf("safe=%v limited=%v error=%v; want both %v", IsUnsubmitted(err), IsRateLimited(err), err, tc.wantSafe)
+			}
+		})
 	}
 }

@@ -41,6 +41,7 @@ packages:
       - "A Go service must send a transactional message: an alert, an invitation, a receipt, a report."
       - "A caller must prove afterwards that a specific message reached the account's Sent mailbox."
       - "A caller must decide whether a failed send is safe to retry (IsUnsubmitted)."
+      - "A caller needs typed rate-limit evidence (IsRateLimited and RateLimitError) for a bounded retry policy."
     do_not_use_when:
       - "The work is bulk or campaign sending, list management, or unsubscribe handling."
       - "The service runs on the Workers runtime in TypeScript: use @growth-labs/email (transactional) or @growth-labs/mailer (campaigns)."
@@ -55,6 +56,7 @@ packages:
     common_mistakes:
       - "Building an app-local mail client instead of using this module: Fastmail JMAP is the estate's Go email transport, and a second implementation is a defect."
       - "Retrying every failed send: only IsUnsubmitted(err) proves nothing was submitted; a lost response may already have been delivered."
+      - "Retrying permanent unsubmitted errors or parsing human error text: require IsUnsubmitted(err) and IsRateLimited(err) for a rate-limit retry."
       - "Reading the token from an environment variable or a wider-than-0600 file; LoadTokenFile refuses anything else."
       - "Treating a successful Send as delivery proof: it is API acceptance, and VerifyDelivered is the sender-side evidence."
     related_packages: ["testkit"]

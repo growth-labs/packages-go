@@ -173,6 +173,11 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 	// Each method in a JMAP batch runs independently (RFC 8620 section 3.6).
 	// A draft rejection cannot prove what happened to the actual submission.
 	if submissionErr != nil {
+		if IsUnsubmitted(submissionErr) {
+			if err := requireNoImplicitSubmissionChanges(responses, "s1"); err != nil {
+				return "", err
+			}
+		}
 		if IsUnsubmitted(submissionErr) && IsUnsubmitted(draftErr) && IsRateLimited(draftErr) {
 			return "", draftErr
 		}
@@ -182,6 +187,42 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 		return "", errors.New("fastmail: draft result conflicts with accepted submission")
 	}
 	return messageID, nil
+}
+
+// The request has one onSuccessUpdateEmail action, tied to its sole submission.
+// Any effects or attempted effects in the implicit Email/set therefore conflict
+// with a claimed submission rejection (RFC 8621 section 7.5). Empty results are
+// compatible with rejection. This check is only used before granting retry
+// evidence, so a successful send still accepts its ordinary implicit update.
+func requireNoImplicitSubmissionChanges(responses []json.RawMessage, callID string) error {
+	for _, raw := range responses {
+		var entry []json.RawMessage
+		if json.Unmarshal(raw, &entry) != nil || len(entry) != 3 {
+			return errors.New("fastmail: malformed implicit submission response")
+		}
+		var id, name string
+		if json.Unmarshal(entry[2], &id) != nil || json.Unmarshal(entry[0], &name) != nil {
+			return errors.New("fastmail: malformed implicit submission response")
+		}
+		if id != callID || name != "Email/set" {
+			continue
+		}
+		var result struct {
+			Created      map[string]json.RawMessage `json:"created"`
+			Updated      map[string]json.RawMessage `json:"updated"`
+			Destroyed    []string                   `json:"destroyed"`
+			NotCreated   map[string]json.RawMessage `json:"notCreated"`
+			NotUpdated   map[string]json.RawMessage `json:"notUpdated"`
+			NotDestroyed map[string]json.RawMessage `json:"notDestroyed"`
+		}
+		if json.Unmarshal(entry[1], &result) != nil || bytes.Equal(bytes.TrimSpace(entry[1]), []byte("null")) {
+			return errors.New("fastmail: malformed implicit submission changes")
+		}
+		if len(result.Created)+len(result.Updated)+len(result.Destroyed)+len(result.NotCreated)+len(result.NotUpdated)+len(result.NotDestroyed) != 0 {
+			return errors.New("fastmail: submission rejection conflicts with implicit changes")
+		}
+	}
+	return nil
 }
 
 // VerifyDelivered polls Email/query for a message carrying messageID,

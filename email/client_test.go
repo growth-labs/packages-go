@@ -538,3 +538,41 @@ func TestRateLimitRequiresTypedEvidence(t *testing.T) {
 		t.Fatal("Unsubmitted lost wrapped cause")
 	}
 }
+
+func TestSendReconcilesImplicitSubmissionUpdate(t *testing.T) {
+	const draft = `["Email/set",{"created":{"outgoingEmail":{"id":"e"}}},"e1"]`
+	const rejected = `["EmailSubmission/set",{"notCreated":{"outgoingSubmission":{"type":"rateLimit"}}},"s1"]`
+	const accepted = `["EmailSubmission/set",{"created":{"outgoingSubmission":{"id":"s"}}},"s1"]`
+	for _, tc := range []struct {
+		name, submission, implicit string
+		wantSuccess, wantSafe      bool
+	}{
+		{"rejection with successful update", rejected, `{"updated":{"e":null}}`, false, false},
+		{"rejection with attempted update", rejected, `{"notUpdated":{"e":{"type":"forbidden"}}}`, false, false},
+		{"rejection with unexpected create", rejected, `{"created":{"other":{"id":"e2"}}}`, false, false},
+		{"rejection with attempted create", rejected, `{"notCreated":{"other":{"type":"forbidden"}}}`, false, false},
+		{"rejection with unexpected destroy", rejected, `{"destroyed":["e"]}`, false, false},
+		{"rejection with attempted destroy", rejected, `{"notDestroyed":{"e":{"type":"forbidden"}}}`, false, false},
+		{"method rejection with successful update", `["error",{"type":"rateLimit"},"s1"]`, `{"updated":{"e":null}}`, false, false},
+		{"rejection with malformed update", rejected, `{"updated":"unknown"}`, false, false},
+		{"rejection with null implicit result", rejected, `null`, false, false},
+		{"rejection with empty implicit result", rejected, `{"updated":null,"notUpdated":{}}`, false, true},
+		{"accepted with successful update", accepted, `{"updated":{"e":null}}`, true, false},
+		{"accepted with failed mailbox update", accepted, `{"notUpdated":{"e":{"type":"forbidden"}}}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeJMAPServer(t)
+			fake.submitResponse = `{"methodResponses":[` + draft + `,` + tc.submission + `,["Email/set",` + tc.implicit + `,"s1"]]}`
+			id, err := fake.client(t).SendWithMessageID(context.Background(), []string{"recipient@example.test"}, "subject", "body", "stable@example.test")
+			if tc.wantSuccess {
+				if err != nil || id != "stable@example.test" {
+					t.Fatalf("valid submission failed: id=%q error=%v", id, err)
+				}
+				return
+			}
+			if err == nil || IsUnsubmitted(err) != tc.wantSafe || IsRateLimited(err) != tc.wantSafe {
+				t.Fatalf("safe=%v limited=%v error=%v; want both %v", IsUnsubmitted(err), IsRateLimited(err), err, tc.wantSafe)
+			}
+		})
+	}
+}

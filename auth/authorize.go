@@ -12,7 +12,12 @@ func (c *Client) Authorize(origin *url.URL, provider, redirectPath string) (*url
 	if origin == nil || origin.Host == "" || (origin.Scheme != "https" && origin.Scheme != "http") {
 		return nil, Transaction{}, errorf(CodeInvalidConfig, "origin must be an absolute HTTP URL")
 	}
-	if !contains(c.config.Providers, provider) {
+	// An empty provider is "let the issuer ask". The issuer renders its own
+	// chooser over the providers it has configured, which is the only way a
+	// consumer offers a choice without rebuilding that page — and a consumer
+	// that pre-picks one, as every consumer did by defaulting to Google, hides
+	// the others from anyone who cannot complete it.
+	if provider != "" && !contains(c.config.Providers, provider) {
 		return nil, Transaction{}, errorf(CodeInvalidProvider, "provider is not configured")
 	}
 	verifier, err := randomBase64URL()
@@ -50,8 +55,10 @@ func (c *Client) Authorize(origin *url.URL, provider, redirectPath string) (*url
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"provider":              {issuerProvider},
 		"resource":              {c.config.Resource},
+	}
+	if issuerProvider != "" {
+		query.Set("provider", issuerProvider)
 	}
 	authorizationURL, _ := url.Parse(c.config.Issuer + "/authorize")
 	authorizationURL.RawQuery = query.Encode()

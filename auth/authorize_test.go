@@ -98,6 +98,30 @@ func TestAuthorizeAliasesEmailCodeAndRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestAuthorizeWithoutAProviderLeavesTheChoiceToTheIssuer(t *testing.T) {
+	client := newClient(t)
+	origin, _ := url.Parse("https://consumer.example.test")
+	authorizationURL, transaction, err := client.Authorize(origin, "", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The parameter must be absent, not empty: an empty provider selects no
+	// provider at the issuer and renders an error, where an absent one renders
+	// the chooser over everything the issuer has configured.
+	if _, present := authorizationURL.Query()["provider"]; present {
+		t.Fatalf("provider parameter present in %s", authorizationURL)
+	}
+	if transaction.Provider != "" {
+		t.Fatalf("transaction provider = %q, want empty", transaction.Provider)
+	}
+	if got := authorizationURL.Query().Get("state"); got != transaction.State || got == "" {
+		t.Fatalf("state = %q, transaction state = %q", got, transaction.State)
+	}
+	if got := authorizationURL.Query().Get("code_challenge"); got != transaction.Challenge || got == "" {
+		t.Fatalf("challenge = %q, transaction challenge = %q", got, transaction.Challenge)
+	}
+}
+
 func TestAuthorizeCollapsesUnsafeRedirectPaths(t *testing.T) {
 	client := newClient(t)
 	origin, _ := url.Parse("https://consumer.example.test")

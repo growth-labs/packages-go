@@ -111,6 +111,29 @@ packages:
       - "Retrying a CodeDuplicateRead or CodeCallBudgetExhausted failure immediately: both mean the budget/dedupe guard did its job, not that the call transiently failed."
     related_packages: []
 
+  lifecycle:
+    name: "github.com/growth-labs/packages-go/lifecycle"
+    summary: "Stdlib-only daemon signal + graceful-shutdown harness for Go services: wait for an OS shutdown signal with an explicit force-exit on a repeated one, and drain a set of named components concurrently against a shared shutdown deadline."
+    stability: experimental
+    use_when:
+      - "A daemon's main needs to turn SIGTERM/SIGINT into a graceful shutdown and force-exit the process if a second signal arrives while shutdown is still in progress."
+      - "A daemon has several independently-shutdownable components (HTTP/unix-socket listeners, background loops) that should all be told to stop at once, with a shared deadline, rather than shut down one at a time or left to a bespoke WaitGroup."
+    do_not_use_when:
+      - "The work is scheduling (tickers, cadence, retry/backoff loops), a receipt interface, the observability client, or the signed-release envelope: none of those are in this module, and it must stay stdlib-only and importable without pulling in any consumer's domain logic."
+      - "A component's own shutdown needs to call back into a specific daemon's domain state: Target.Shutdown is a plain func(context.Context) error the caller supplies; this module never inspects or depends on what it does."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/lifecycle"
+      - "received := lifecycle.WaitForSignal(signals, func(os.Signal) { os.Exit(1) }) inside a signal-watching goroutine, or lifecycle.ArmSecondSignal(signals, forceExit) right after your own select consumes the first signal"
+      - "lifecycle.Drain(drainCtx, report, lifecycle.Target{Name: \"intake\", Shutdown: intake.Shutdown}, ...) to stop every named component concurrently"
+    required_env: []
+    working_example_path: "lifecycle/example_test.go"
+    common_mistakes:
+      - "Calling ArmSecondSignal before your own select has consumed the first signal: it watches for the *next* value on the channel, so arming it too early can consume the first signal itself."
+      - "Passing a nil Shutdown func on a Target: Drain calls it directly and panics, the same as invoking a nil function anywhere else."
+      - "Giving Drain's context no deadline: Shutdown implementations are expected to honor ctx, but nothing in this package enforces a timeout on their behalf."
+      - "Reimplementing this daemon's own drainTarget/drainIntakes or signal-plus-force-exit shape locally instead of extending this module: extracted from foundryd and foundry-runner precisely so a third daemon does not do it again."
+    related_packages: []
+
   packaging:
     name: "github.com/growth-labs/packages-go/packaging"
     summary: "Fleet packaging and deployment conventions for Go services: static cross-builds with provenance, portable checksums, signed artifact manifests, hardened systemd units, and health-checked symlink-swap deployment with rollback."

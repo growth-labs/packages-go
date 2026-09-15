@@ -5,6 +5,7 @@ toolchain go1.26.6
 use (
 	./auth
 	./email
+	./fulcrumprojects
 	./github
 	./packaging
 	./pg

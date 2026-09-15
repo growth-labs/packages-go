@@ -145,10 +145,10 @@ const (
 	KindQueryOnDeckList        = "on-deck.list"
 )
 
-// Project-task statuses as the store admits them today. Someday and
-// Scheduled are the G-02 additions (Golem ruling 7); they are declared so a
-// consumer can name them, and the client refuses them until the store's
-// schema carries them (see AdmitsStatus).
+// Project-task statuses. Someday and Scheduled are the G-02 additions
+// (Golem ruling 7), carried by the store since the fulcrum-projects
+// project-task-someday-scheduled migration; AdmitsStatus is the one place
+// that says which statuses a builder accepts.
 const (
 	StatusNext      = "Next"
 	StatusWaiting   = "Waiting"
@@ -272,12 +272,12 @@ func NewMutationID() string {
 }
 
 // AdmitsStatus reports whether a project-task status is one the store's
-// schema carries today. Someday and Scheduled return false until the G-02
-// migration lands in fulcrum-projects; a caller that needs them maps to
-// Waiting or Blocked with a note, never silently to Next.
+// schema carries: the five original states plus Someday and Scheduled
+// (G-02). Anything else is refused by the builders rather than mapped
+// silently.
 func AdmitsStatus(status string) bool {
 	switch status {
-	case StatusNext, StatusWaiting, StatusDecision, StatusSetup, StatusBlocked:
+	case StatusNext, StatusWaiting, StatusDecision, StatusSetup, StatusBlocked, StatusSomeday, StatusScheduled:
 		return true
 	}
 	return false

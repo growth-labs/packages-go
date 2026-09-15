@@ -14,9 +14,9 @@ var (
 )
 
 // ProjectTaskCreate builds project-task.create on project slug: a Next
-// Action owned by assignee (member id), or a Waiting/Blocked item. A status
-// the store does not admit yet (Someday, Scheduled) is refused here rather
-// than mapped silently.
+// Action owned by assignee (member id), a Waiting/Blocked item, or a
+// Someday/Scheduled one. A status the store does not admit is refused here
+// rather than mapped silently.
 func ProjectTaskCreate(slug, title, priority, status string, assigneeMemberID *int64, parentTaskID *int64) (Mutation, error) {
 	if !slugPattern.MatchString(slug) || title == "" || len(title) > 240 {
 		return Mutation{}, errorf(CodeInvalidRequest, 0, "project task needs a slug and a title")
@@ -128,7 +128,7 @@ func DelegationComplete(assignmentID string, version int64, summary string) (Mut
 }
 
 // DailyLinkSchedule builds daily-link.schedule: put a project task on a
-// day (the Scheduled state until the store carries it natively).
+// day (a due or check date on any task; the Scheduled status is the state).
 func DailyLinkSchedule(projectTaskID, date string) (Mutation, error) {
 	if projectTaskID == "" || !datePattern.MatchString(date) {
 		return Mutation{}, errorf(CodeInvalidRequest, 0, "daily link needs a project task and a YYYY-MM-DD date")

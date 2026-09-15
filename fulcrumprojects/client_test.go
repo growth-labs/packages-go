@@ -225,8 +225,14 @@ func TestMutationsAreRetriedOnceWithAFreshSnapshotAndFreshIds(t *testing.T) {
 	if posts != 2 || len(ids) != 1 || ids[0] == stale.MutationID {
 		t.Fatalf("posts=%d ids=%v stale=%s", posts, ids, stale.MutationID)
 	}
-	if _, err := ProjectTaskCreate("hosting", "later", PriorityMedium, StatusSomeday, nil, nil); !IsCode(err, CodeInvalidRequest) {
-		t.Fatalf("Someday must be refused until the store admits it: %v", err)
+	for _, status := range []string{StatusSomeday, StatusScheduled} {
+		m, err := ProjectTaskCreate("hosting", "later", PriorityMedium, status, nil, nil)
+		if err != nil || !strings.Contains(string(m.Payload), `"status":"`+status+`"`) {
+			t.Fatalf("%s must be admitted since the G-02 migration: %v", status, err)
+		}
+	}
+	if _, err := ProjectTaskCreate("hosting", "later", PriorityMedium, "Later", nil, nil); !IsCode(err, CodeInvalidRequest) {
+		t.Fatalf("an unknown status must still be refused: %v", err)
 	}
 }
 

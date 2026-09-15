@@ -33,10 +33,9 @@ snapshot, results, err := client.Retry(ctx, func(s fulcrumprojects.Snapshot) ([]
   `status` (`applied`, `answered`, `conflict`, `duplicate`, `rejected`,
   `retryable`). `Results.Applied` reads one applied entity or a typed error.
 - **Statuses.** Project tasks admit `Next`, `Waiting`, `Decision`, `Setup`,
-  `Blocked` today. `Someday` and `Scheduled` are declared for the G-02
-  migration of fulcrum-projects and refused by the builders until the store
-  carries them (`AdmitsStatus`). Delegations use `open`, `in-progress`,
-  `waiting`, `done`.
+  `Blocked`, `Someday` and `Scheduled` (the last two since the G-02
+  migration of fulcrum-projects; `AdmitsStatus` is the one place that says
+  so). Delegations use `open`, `in-progress`, `waiting`, `done`.
 - **Identities.** Members are integers on the wire (`assigneeMemberId`),
   `member:<id>` as entity ids, and a numeric string in
   `delegation.create.assignee`. Projects are referenced by slug as

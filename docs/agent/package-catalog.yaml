@@ -61,6 +61,32 @@ packages:
       - "Treating a successful Send as delivery proof: it is API acceptance, and VerifyDelivered is the sender-side evidence."
     related_packages: ["testkit"]
 
+  fulcrumprojects:
+    name: "github.com/growth-labs/packages-go/fulcrumprojects"
+    summary: "Fulcrum Projects /api/v2 client for Go services: device-token bearer auth, the snapshot/changes/mutations envelopes, the mutation builders for the GTD mapping (project tasks, todos, delegations, daily links), one-shot retry with a fresh snapshot and fresh mutation ids on a 409 sync_epoch_mismatch, and a typed error taxonomy."
+    stability: experimental
+    use_when:
+      - "A Go service (golemd first) must read a Fulcrum Projects workspace (snapshot, then incremental changes since a cursor) or write to it through the same idempotent mutation batch the app's own sync client uses."
+      - "A caller needs the epoch/409 contract handled once: echo the workspace epoch, retry a stale batch exactly once with a fresh snapshot and fresh mutation ids, and report every other result status loudly."
+    do_not_use_when:
+      - "You need Fulcrum Projects' schema, sync engine or admin import/rollback: those live in fulcrum-labs/fulcrum-projects; this module is a client of its public /api/v2 only."
+      - "The caller runs on the Workers runtime in TypeScript: use the app's own sync client."
+      - "You want a second scheduling seam outside the app's API (a direct database or D1 path): the ruling is one machine-callable surface, the app's /api/v2."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/fulcrumprojects"
+      - "client, err := fulcrumprojects.New(fulcrumprojects.Config{BaseURL, Token, ClientID}) // Token from a mode-0600 file, never a flag or an env var"
+      - "snapshot, err := client.Snapshot(ctx, \"\"); changes, err := client.Changes(ctx, snapshot.Cursor, snapshot.Epoch)"
+      - "m, err := fulcrumprojects.ProjectTaskCreate(slug, title, priority, status, assignee, nil); snapshot, results, err := client.Retry(ctx, func(s fulcrumprojects.Snapshot) ([]fulcrumprojects.Mutation, error) { return []fulcrumprojects.Mutation{m}, nil })"
+    required_env: []
+    working_example_path: "fulcrumprojects/example_test.go"
+    common_mistakes:
+      - "Reusing mutation ids on a retry after a 409: the app folds the epoch into its idempotency hash, so a retried batch needs fresh ids (Retry does this); reusing them returns duplicate results, not applied ones."
+      - "Retrying more than once or on any status other than a 409 sync_epoch_mismatch: the epoch moves only on an admin import or rollback, and a second mismatch means a human is changing the workspace."
+      - "Treating a batch as applied because the HTTP call returned 200: every result carries its own status (applied, answered, conflict, duplicate, rejected, retryable) and Results.Applied is the check."
+      - "Sending more than 32 mutations or 1 MiB in one batch: the API refuses it; split the batch."
+      - "Logging or fmt-printing the client to see its config: String()/GoString() redact the token on purpose."
+    related_packages: []
+
   github:
     name: "github.com/growth-labs/packages-go/github"
     summary: "GitHub App installation-token minter for Go services: RS256 App JWT signing, per-call narrowly-scoped tokens (never the installation's full default grant), a budgeted client (call cap, duplicate-read dedupe, rate_limit preflight), and a two-class configuration/transport error taxonomy — no SDK, no third-party JWT/RSA dependency."

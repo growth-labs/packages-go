@@ -32,12 +32,52 @@ type File struct {
 }
 
 // Manifest authenticates a complete artifact directory.
+//
+// MainProof, CIRunID, and ToolingSHA256 are declared optional: a manifest
+// sealed without them is unchanged from before they existed (the fields are
+// omitted from the JSON entirely and Verify does not require them), and a
+// manifest sealed with them carries them inside the signed bytes, so
+// tampering with any one of them after sealing invalidates the signature
+// exactly like tampering with Files does. They are named for the general
+// security properties they capture, not for any one caller's vocabulary, so
+// other sealers (for example a publication-release pipeline) can populate
+// the same fields for the same properties instead of inventing their own.
 type Manifest struct {
 	Schema    string `json:"schema"`
 	Version   string `json:"version"`
 	Revision  string `json:"revision"`
 	CreatedAt string `json:"createdAt"`
 	Files     []File `json:"files"`
+
+	// MainProof is an optional ahead/identical ancestry proof: it records
+	// that the sealed revision is ahead of, or identical to, a named trunk
+	// revision, for callers that must prove the artifact descends from a
+	// specific reviewed commit before treating it as releasable. Nil is
+	// valid; Verify does not require it.
+	MainProof *MainProof `json:"mainProof,omitempty"`
+
+	// CIRunID optionally binds the sealed artifact to one managed-CI run,
+	// so a verifier can cross-check it against an out-of-band receipt from
+	// that run instead of trusting the artifact's own claim alone. Zero
+	// means absent; Verify does not require it.
+	CIRunID int64 `json:"ciRunId,omitempty"`
+
+	// ToolingSHA256 optionally records the SHA-256 of the installer or
+	// tooling bytes that sealed this artifact, so that same tooling can
+	// refuse to act on the artifact unless its own running bytes still
+	// hash-match this value. Empty means absent; Verify does not require
+	// it.
+	ToolingSHA256 string `json:"toolingSHA256,omitempty"`
+}
+
+// MainProof is the ahead/identical ancestry proof carried by Manifest.
+type MainProof struct {
+	// Main is the trunk revision the proof is made against.
+	Main string `json:"main"`
+	// Target is the revision the proof describes.
+	Target string `json:"target"`
+	// Status is "ahead" or "identical".
+	Status string `json:"status"`
 }
 
 // Metadata supplies provenance for a new manifest.
@@ -45,6 +85,12 @@ type Metadata struct {
 	Version   string
 	Revision  string
 	CreatedAt time.Time
+
+	// MainProof, CIRunID, and ToolingSHA256 are optional; the zero value of
+	// each (nil, 0, "") omits the corresponding Manifest field entirely.
+	MainProof     *MainProof
+	CIRunID       int64
+	ToolingSHA256 string
 }
 
 // Artifact reports the hashes emitted by Seal.
@@ -63,6 +109,7 @@ func Seal(ctx context.Context, directory string, metadata Metadata, privateKey e
 	manifest := Manifest{
 		Schema: ManifestSchema, Version: metadata.Version, Revision: metadata.Revision,
 		CreatedAt: metadata.CreatedAt.UTC().Format(time.RFC3339Nano), Files: files,
+		MainProof: metadata.MainProof, CIRunID: metadata.CIRunID, ToolingSHA256: metadata.ToolingSHA256,
 	}
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {

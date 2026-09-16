@@ -1,0 +1,66 @@
+{
+	"version": 1,
+	"excludeDirs": [
+		".claude/",
+		".agents/",
+		".codex/",
+		".gemini/",
+		".github/",
+		"/docs/",
+		"/scripts/ci/",
+		"node_modules/",
+		"dist/",
+		"vendor/",
+		"testdata/",
+		"__tests__/",
+		"fixtures/",
+		".worktrees/"
+	],
+	"excludeFiles": ["\\.(test|spec)\\.[cm]?[jt]sx?$", "_test\\.go$", "\\.md$"],
+	"kinds": [
+		{
+			"kind": "migration",
+			"added": ["(^|/)migrations?/[^/]+\\.(sql|ts|js|mjs|go)$"]
+		},
+		{
+			"kind": "schema",
+			"added": ["(^|/)schema[^/]*\\.(sql|ts|prisma|graphql)$"]
+		},
+		{
+			"kind": "component",
+			"added": [
+				"(^|/)components/(?!starwind/)(?:(?!/starwind/).)+\\.(astro|tsx|jsx|svelte)$"
+			]
+		},
+		{
+			"kind": "worker",
+			"added": [
+				"(^|/)wrangler[^/]*\\.(toml|jsonc?)$",
+				"(^|/)(workers|functions)/[^/]+/index\\.[cm]?[jt]s$"
+			]
+		},
+		{
+			"kind": "package",
+			"added": ["^packages/[^/]+/package\\.json$", "(^|/)go\\.mod$"]
+		},
+		{
+			"kind": "client",
+			"added": [
+				"(^|/)(clients?|integrations?|providers?|adapters?)/[^/]+\\.([cm]?[jt]s|go)$"
+			]
+		},
+		{
+			"kind": "module",
+			"newDirUnder": [
+				"internal/",
+				"domain/",
+				"packages/",
+				"apps/",
+				"src/lib/",
+				"src/services/",
+				"src/server/",
+				"server/internal/"
+			]
+		}
+	]
+}

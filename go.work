@@ -12,5 +12,6 @@ use (
 	./pg
 	./s3
 	./sidecar
+	./synthetictraffic
 	./testkit
 )

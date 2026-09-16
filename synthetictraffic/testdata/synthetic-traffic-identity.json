@@ -1,0 +1,56 @@
+{
+	"$comment": "Shared cross-language contract fixture for createSyntheticTrafficIdentity (growth-labs/packages, packages/monitoring/src/canary/traffic.ts) and its Go counterpart, growth-labs/packages-go/synthetictraffic. This is the single canonical copy: the TypeScript suite (packages/monitoring/__tests__/canary/traffic.fixture.test.ts) reads it across the repo boundary from a sibling checkout of packages-go. Do not duplicate these cases elsewhere; add a case here and both suites pick it up.",
+	"cases": [
+		{
+			"name": "default-owner",
+			"input": {
+				"tool": "authenticated-browser-canary",
+				"version": "1.2.3",
+				"realm": "fulcrum-labs",
+				"site": "fronts",
+				"environment": "production",
+				"surface": "media.video-playback",
+				"runId": "d6be7f13-5418-431d-bc3c-8f74d22131b6"
+			},
+			"expected": {
+				"trafficClass": "synthetic",
+				"runId": "d6be7f13-5418-431d-bc3c-8f74d22131b6",
+				"userAgent": "FulcrumInternal/authenticated-browser-canary/1.2.3 (+https://fulcrum-labs.com/ops/monitoring; owner=olympus; realm=fulcrum-labs; site=fronts; env=production; surface=media.video-playback)",
+				"headers": {
+					"X-Fulcrum-Internal-Tool": "authenticated-browser-canary",
+					"X-Fulcrum-Traffic-Class": "synthetic",
+					"X-Fulcrum-Monitor-Site": "fronts",
+					"X-Fulcrum-Monitor-Env": "production",
+					"X-Fulcrum-Monitor-Surface": "media.video-playback",
+					"X-Fulcrum-Monitor-Run-Id": "d6be7f13-5418-431d-bc3c-8f74d22131b6"
+				}
+			}
+		},
+		{
+			"name": "explicit-owner",
+			"input": {
+				"tool": "subscriber-canary",
+				"version": "2.0.0",
+				"realm": "growth-labs",
+				"site": "hq",
+				"environment": "staging",
+				"surface": "publisher.read-preview",
+				"runId": "8fc0ceec-b98e-448f-a8db-bd5c2f67a34c",
+				"owner": "phoenix"
+			},
+			"expected": {
+				"trafficClass": "synthetic",
+				"runId": "8fc0ceec-b98e-448f-a8db-bd5c2f67a34c",
+				"userAgent": "FulcrumInternal/subscriber-canary/2.0.0 (+https://fulcrum-labs.com/ops/monitoring; owner=phoenix; realm=growth-labs; site=hq; env=staging; surface=publisher.read-preview)",
+				"headers": {
+					"X-Fulcrum-Internal-Tool": "subscriber-canary",
+					"X-Fulcrum-Traffic-Class": "synthetic",
+					"X-Fulcrum-Monitor-Site": "hq",
+					"X-Fulcrum-Monitor-Env": "staging",
+					"X-Fulcrum-Monitor-Surface": "publisher.read-preview",
+					"X-Fulcrum-Monitor-Run-Id": "8fc0ceec-b98e-448f-a8db-bd5c2f67a34c"
+				}
+			}
+		}
+	]
+}

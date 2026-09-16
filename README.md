@@ -29,6 +29,12 @@ Current modules:
   record (`component-cut.json`): store, kind, cut identity, capturedAt,
   schema version, writer generation, control-log sequence/hash, cross-store
   cursors, and the encrypted-owner-cut ciphertext identity/recipients.
+- `synthetictraffic` — stdlib-only Go counterpart of
+  `@growth-labs/monitoring`'s `createSyntheticTrafficIdentity`: the synthetic
+  traffic user agent, the six `X-Fulcrum-*` headers, and the
+  `trafficClass`/`runId` pair, mirrored field for field from
+  `packages/monitoring/src/canary/traffic.ts` and pinned by a fixture shared
+  with that TypeScript suite.
 
 The repository and its tagged modules are public. Standard Go module resolution
 uses the public module proxy (`proxy.golang.org`) by default:

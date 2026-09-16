@@ -226,6 +226,28 @@ packages:
       - "Constructing a CutRecord by hand for Encrypted=true without CiphertextSHA256/CiphertextBytes/Recipients, or setting any of those without Encrypted=true: Validate rejects both as a shape the real writer never produces."
     related_packages: []
 
+  synthetictraffic:
+    name: "github.com/growth-labs/packages-go/synthetictraffic"
+    summary: "Stdlib-only Go counterpart of @growth-labs/monitoring's createSyntheticTrafficIdentity: builds the synthetic-traffic user agent, the six X-Fulcrum-* headers, and the trafficClass/runId pair, mirrored field for field from packages/monitoring/src/canary/traffic.ts and pinned against that TypeScript suite by a shared fixture."
+    stability: experimental
+    use_when:
+      - "A Go probe or canary must identify itself as synthetic traffic the same way a Workers-runtime probe does, so CSP-report suppression, attribution, filtering, and correlation all work identically across languages."
+      - "A caller needs the exact traffic.ts identity shape (user agent plus all six headers) rather than a partial or ad hoc synthetic-traffic marker."
+    do_not_use_when:
+      - "You only need CSP-report suppression by user-agent prefix and are tempted to hardcode just that string: the ruling this package implements explicitly rejects sending the prefix without the headers, because every field is used downstream."
+      - "The caller runs on the Workers runtime in TypeScript: use @growth-labs/monitoring's createSyntheticTrafficIdentity directly."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/synthetictraffic"
+      - "identity := synthetictraffic.New(synthetictraffic.Input{Tool, Version, Realm, Site, Environment, Surface, RunID}) // Owner optional, defaults to \"olympus\""
+      - "req.Header.Set(\"User-Agent\", identity.UserAgent); apply every entry in identity.Headers to the same request"
+    required_env: []
+    working_example_path: "synthetictraffic/example_test.go"
+    common_mistakes:
+      - "Sending only the UserAgent and dropping Headers: it passes CSP-report suppression but breaks every downstream attribution/filter/correlation path that keys off the X-Fulcrum-* headers."
+      - "Hardcoding \"FulcrumInternal/\" or the header names in a consumer instead of using this package: identity.go is the one place that literal exists in this module, and traffic.ts is the one place it exists in the other."
+      - "Adding a field to traffic.ts's SyntheticTrafficIdentityInput/SyntheticTrafficIdentity without adding it to Input/Identity here in the same change: the shared fixture's strict JSON decoding on the Go side will catch the drift, but only once someone runs the test."
+    related_packages: []
+
   testkit:
     name: "github.com/growth-labs/packages-go/testkit"
     summary: "Shared test harness: strict JSON fixture runners, the falsifiable-guard mutation helper (ProveGuard), and a disposable real-PostgreSQL harness."

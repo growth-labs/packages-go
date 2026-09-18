@@ -1603,9 +1603,9 @@ The TypeScript Foundry on Cloudflare (`fulcrum-labs/the-foundry`) is frozen. Its
 
 ## Provenance
 
-Generated 2026-09-18T18:14:51.891Z from:
+Generated 2026-09-18T20:47:07.420Z from:
 
-- `growth-labs/packages` — https://github.com/growth-labs/packages @ `766ad6569db7ca5a46256df07e9b4e1ec1753d72` (observed 2026-09-18T18:14:51.891Z)
-- `growth-labs/packages-go` — https://github.com/growth-labs/packages-go @ `1465681fc3a6d6be192edadc6234a4b0a370cfa6` (observed 2026-09-18T18:14:51.891Z)
-- `fulcrum-labs/foundry` — https://github.com/fulcrum-labs/foundry @ `f6f6132a40eeb4859bd6dc78e78396f1618a10af` (observed 2026-09-18T18:14:51.891Z)
-- `fulcrum-labs/platform-foundations` — https://github.com/fulcrum-labs/platform-foundations @ `8accf6d21bd82cb81a38c3e99d9071bd44ec0693` (observed 2026-09-18T18:14:51.891Z)
+- `growth-labs/packages` — https://github.com/growth-labs/packages @ `ec014753ae315bc9a462b53efbbba3835b35e8d1` (observed 2026-09-18T20:47:07.420Z)
+- `growth-labs/packages-go` — https://github.com/growth-labs/packages-go @ `5b28c9ba79e2e8dc3a17778a37a54f052f5cab1e` (observed 2026-09-18T20:47:07.420Z)
+- `fulcrum-labs/foundry` — https://github.com/fulcrum-labs/foundry @ `5d96d4e108d36e7d8a8ac86202e3dcddf99efede` (observed 2026-09-18T20:47:07.420Z)
+- `fulcrum-labs/platform-foundations` — https://github.com/fulcrum-labs/platform-foundations @ `5d9c32c57bdd1fac8836437c4f032a1678ba709e` (observed 2026-09-18T20:47:07.420Z)

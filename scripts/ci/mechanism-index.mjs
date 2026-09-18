@@ -22,8 +22,8 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   statSync,
   writeFileSync,

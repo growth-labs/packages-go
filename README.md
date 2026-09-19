@@ -15,6 +15,9 @@ Current modules:
   secure session cookies, and `net/http` middleware.
 - `email` — Fastmail JMAP transactional email: estate identity selection,
   send, and sender-side delivery proof.
+- `foundryoperator` — dependency-free signer for FOUNDRY-OPERATOR-V1 operator
+  proofs: canonical-JSON encoding and Ed25519 signing for foundryd's
+  operator-proof surface.
 - `testkit` — JSON fixture runners, falsifiable-guard mutation helpers, and a
   disposable real-PostgreSQL harness.
 - `pg` — ordered PostgreSQL migrations, export gating, a version ledger, and

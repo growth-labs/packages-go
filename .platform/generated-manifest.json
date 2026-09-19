@@ -1,7 +1,7 @@
 {
 	"schema": 1,
 	"generator": "fulcrum-labs/platform-foundations",
-	"generatorCommit": "2026-09-18-5d9c32c",
+	"generatorCommit": "2026-09-19-08de364",
 	"paths": {
 		".agents/skills/extend-what-exists/SKILL.md": {
 			"sha256": "96b2c40058c4137d147e71340c6395391fe1fad7688f3d8b5a7e7fb90db1a3ba",
@@ -14,9 +14,9 @@
 			"generatorCommit": "2026-09-18-4898cfb"
 		},
 		".claude/rules/shared-capabilities.md": {
-			"sha256": "c3c786f9f72b3b599228ad019e5e7c15fca7c9e6b55dafead92d57c975a169f6",
+			"sha256": "c27e7abf87f9c3e7b5a15e598031ee7ba5f024a30ab8bf77c777ac646dfe1989",
 			"generator": "fulcrum-labs/platform-foundations",
-			"generatorCommit": "2026-09-18-4898cfb"
+			"generatorCommit": "2026-09-19-08de364"
 		},
 		".claude/skills/extend-what-exists/SKILL.md": {
 			"sha256": "96b2c40058c4137d147e71340c6395391fe1fad7688f3d8b5a7e7fb90db1a3ba",
@@ -24,19 +24,29 @@
 			"generatorCommit": "2026-09-18-4898cfb"
 		},
 		".github/workflows/pr-metadata.yml": {
-			"sha256": "aa9c3581dc0e16dfbcad390cf88d39cf917b0b4833f6712073b4d03835d6445d",
+			"sha256": "cc08e8b7cd53ed92e6aea33eacc157035b4b8c714fef3e6b32b46ef17e350c04",
 			"generator": "fulcrum-labs/platform-foundations",
-			"generatorCommit": "2026-09-18-5d9c32c"
+			"generatorCommit": "2026-09-19-08de364"
 		},
 		"docs/agent/shared-capabilities.md": {
-			"sha256": "f6f9f1eafb9f9ef30180da799673f265edad6fa412d38759c29448c430de3f57",
+			"sha256": "e615cca3e831e6099ffc47dfad1326d44efceca86cacf3dc11bf2bc1474b4cd4",
 			"generator": "fulcrum-labs/platform-foundations",
-			"generatorCommit": "2026-09-18-5d9c32c"
+			"generatorCommit": "2026-09-19-08de364"
+		},
+		"scripts/ci/finish-pr.mjs": {
+			"sha256": "c54c2961fbc20f3f100e3436ba365d72c8a4e13a2e844a56d05e2941fe5944a5",
+			"generator": "fulcrum-labs/platform-foundations",
+			"generatorCommit": "2026-09-19-08de364"
 		},
 		"scripts/ci/mechanism-index.mjs": {
-			"sha256": "4c6d70dad7e81b391b02898582170ea694766090501b40b3b2a6d89f8ae604a8",
+			"sha256": "95f86d9340cd82eae2f2027affe23b0b8a3ebb241bcfb3d1174462ee408a237f",
 			"generator": "fulcrum-labs/platform-foundations",
-			"generatorCommit": "2026-09-18-51e23d7"
+			"generatorCommit": "2026-09-19-08de364"
+		},
+		"scripts/ci/pr-completion.mjs": {
+			"sha256": "5bceb3993f827a8356302e7e82df9b154e0d179ded6cf752d6b0458c6ae55c5d",
+			"generator": "fulcrum-labs/platform-foundations",
+			"generatorCommit": "2026-09-19-08de364"
 		}
 	}
 }

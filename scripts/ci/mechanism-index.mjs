@@ -19,15 +19,7 @@
 //
 // Exit codes: 0 ok · 1 drift or missing index · 2 usage or policy error.
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import * as fs from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -94,12 +86,12 @@ function parseArguments(argv) {
 
 function loadPolicy(root, policyPath) {
   const path = policyPath ? resolve(root, policyPath) : join(root, POLICY_PATH);
-  if (!existsSync(path)) {
+  if (!fs.existsSync(path)) {
     throw new UsageError(
       `mechanism policy missing at ${path}; the platform conventions sync propagates it`,
     );
   }
-  const parsed = JSON.parse(readFileSync(path, "utf8"));
+  const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
   if (!parsed || !Array.isArray(parsed.kinds))
     throw new UsageError(`mechanism policy at ${path} is malformed`);
   return parsed;
@@ -166,7 +158,7 @@ function gitListedFiles(root) {
 
 function isRegularFile(path) {
   try {
-    return statSync(path).isFile();
+    return fs.statSync(path).isFile();
   } catch {
     return false;
   }
@@ -177,7 +169,7 @@ function walkedFiles(root, policy) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = readdirSync(join(root, dir), { withFileTypes: true });
+      entries = fs.readdirSync(join(root, dir), { withFileTypes: true });
     } catch {
       return;
     }
@@ -205,8 +197,8 @@ function filesystemSource(root, policy) {
     : walkedFiles(root, policy);
   return {
     files: files.sort(byCodeUnit),
-    read: (rel) => readFileSync(join(root, rel), "utf8"),
-    exists: (rel) => existsSync(join(root, rel)),
+    read: (rel) => fs.readFileSync(join(root, rel), "utf8"),
+    exists: (rel) => fs.existsSync(join(root, rel)),
   };
 }
 
@@ -469,8 +461,8 @@ function main(argv) {
   }
   if (options.mode === "write") {
     const target = join(options.root, OUTPUT_PATH);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, rendered);
+    fs.mkdirSync(dirname(target), { recursive: true });
+    fs.writeFileSync(target, rendered);
     console.log(
       `mechanism-index: wrote ${OUTPUT_PATH} (${source.files.length} files scanned)`,
     );
@@ -505,7 +497,7 @@ function invokedDirectly() {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+    return import.meta.url === pathToFileURL(fs.realpathSync(entry)).href;
   } catch {
     return false;
   }

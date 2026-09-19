@@ -16,7 +16,7 @@ A mechanism is anything another part of the system could call or depend on: a ta
 | Class of work | Home |
 |---|---|
 | Automated, scheduled, cross-site or media work; anything that should inherit the scheduler, receipts and monitoring | Go plane: a `fulcrum-labs/foundry` capability (host record + package + migrations + receipts + tripwire) |
-| Behaviour shared by Workers-runtime sites and apps | `@growth-labs/<pkg>` in `growth-labs/packages` |
+| Behaviour shared by Workers-runtime sites and apps | `@growth-labs/<pkg>` in `growth-labs/packages`; a package whose only consumers are publications lives in `growth-labs/publishing` (`packages/<pkg>`) and is still published to npm from there (publishing-platform spec §1a) |
 | Behaviour shared by Go services | `growth-labs/packages-go/<module>`; extract at the second real use, never copy |
 | Identity, sessions, sign-in | identity-platform (OpenAuth issuer) through `@growth-labs/auth` or `packages-go/auth`; never a standalone auth path |
 | Email | Workers: `@growth-labs/email` (transactional) and `@growth-labs/mailer` (campaigns); Go: `packages-go/email` (Fastmail JMAP) |

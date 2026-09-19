@@ -61,6 +61,28 @@ packages:
       - "Treating a successful Send as delivery proof: it is API acceptance, and VerifyDelivered is the sender-side evidence."
     related_packages: ["testkit"]
 
+  foundryoperator:
+    name: "github.com/growth-labs/packages-go/foundryoperator"
+    summary: "Dependency-free signer for FOUNDRY-OPERATOR-V1 operator proofs: canonical-JSON encoding and Ed25519 signing for foundryd's operator-proof surface (the operator Unix domain socket, and the public /mcp/token and /kb/context routes)."
+    stability: experimental
+    use_when:
+      - "A Go service must sign a request foundryd's operator-proof verifier checks — over the operator UDS, or over HTTPS to a public operator route."
+      - "A second, independent Go caller of this protocol appears (the first was fulcrum-labs/quarry's adapters/foundry package): this package exists so the canonical encoding and signing step is not reimplemented a third time."
+    do_not_use_when:
+      - "You need to verify a proof: this package is a signer only, foundryd's own verifier owns that logic."
+      - "You need human/session authentication (OpenAuth login, cookies): use this repository's auth package. This package is service identity only."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/foundryoperator"
+      - "proof, signature, err := foundryoperator.Sign(principalKey, principalKID, method, normalizedPath, normalizedQuery, body, time.Now(), nil)"
+      - "req.Header.Set(\"X-Foundry-Operator-Proof\", proof); req.Header.Set(\"X-Foundry-Operator-Signature\", signature)"
+    required_env: []
+    working_example_path: "foundryoperator/example_test.go"
+    common_mistakes:
+      - "Reimplementing the canonical-JSON encoding or the proof field set/order in a new consumer instead of depending on this package — that is the exact defect this package exists to prevent (see its README)."
+      - "Widening the issuedAt/expiresAt validity window past what this package signs: every existing signer of this protocol (this package, quarry's prior copies, the JS twin in olympus-control-plane's kb-transport.mjs) uses the same 1s-back/60s-forward window, and foundryd's tolerance is sized to it."
+      - "Passing a principal kid or key that fails Sign's own validation and treating the resulting error as retryable: an invalid kid or wrong-size key never succeeds on retry."
+    related_packages: []
+
   fulcrumprojects:
     name: "github.com/growth-labs/packages-go/fulcrumprojects"
     summary: "Fulcrum Projects /api/v2 client for Go services: device-token bearer auth, the snapshot/changes/mutations envelopes, the mutation builders for the GTD mapping (project tasks, todos, delegations, daily links), one-shot retry with a fresh snapshot and fresh mutation ids on a 409 sync_epoch_mismatch, and a typed error taxonomy."

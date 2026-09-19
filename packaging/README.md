@@ -45,5 +45,9 @@ an immutable revision directory, atomically swaps `CURRENT_LINK` (default
 contain the expected revision. Failed restart or health rolls the symlink back
 and restarts the prior release.
 
+Before activation, group/world-writable files and directories are rejected and
+the release root is set to mode `0755` so the service user can traverse private
+download directories. Payload modes and the supplied artifact stay unchanged.
+
 Adapt `systemd/package.service.example` with the service user, paths, and unit
 name. Keep its hardening and `Restart=always` posture.

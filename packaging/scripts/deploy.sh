@@ -57,6 +57,14 @@ cleanup() {
 trap cleanup EXIT
 
 cp -pPR "$artifact_dir/." "$staging/"
+# cp preserves the download directory's mode, including mktemp's 0700. Reject
+# writable payloads before exposing the release, then permit service traversal.
+unsafe_path="$(find "$staging" ! -type l \( -perm -0020 -o -perm -0002 \) -print -quit)"
+if [ -n "$unsafe_path" ]; then
+  echo "ERROR: artifact has group/world-writable permissions: $unsafe_path" >&2
+  exit 2
+fi
+chmod 0755 "$staging"
 mv "$staging" "$release"
 staging=""
 

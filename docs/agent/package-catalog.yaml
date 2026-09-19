@@ -226,6 +226,30 @@ packages:
       - "Building an app-local SigV4 client, multipart uploader, or ArtifactStore-shaped wrapper instead of using/extending this package: a second implementation of the same signing logic is a defect."
     related_packages: []
 
+  seatpolicy:
+    name: "github.com/growth-labs/packages-go/seatpolicy"
+    summary: "Stdlib-only pure policy for observed coding-seat quota windows and deterministic native ranking of the known public Claude and Codex seats."
+    stability: experimental
+    use_when:
+      - "A Go consumer needs the cockpit-compatible 30-minute quota assessment: minimum remaining percentage, limiting window and reset, with typed unavailable/stale reasons."
+      - "Native Site Brain admission needs a deterministic preference order over known public seats, with mandatory weekly evidence, Claude session evidence, a 90% weekly ceiling, and advisory busy input."
+    do_not_use_when:
+      - "You need to discover seats, parse status files or rollout transcripts, read credentials, or map host paths: those are consumer-owned input adapters."
+      - "You need to reserve or fence a seat: the caller must recheck durable occupancy atomically with its own call-budget admission."
+      - "You need predicted future capacity: this policy assesses only supplied observations at the supplied now."
+    minimal_setup:
+      - "go get github.com/growth-labs/packages-go/seatpolicy"
+      - "assessment := seatpolicy.Assess(now, windows) // inspect State and typed Reason before HeadroomPercent"
+      - "ranking := seatpolicy.Rank(now, candidates); attempt durable admission in Eligible order"
+    required_env: []
+    working_example_path: "seatpolicy/example_test.go"
+    common_mistakes:
+      - "Treating nil headroom as numeric zero, or summing quota windows: stale/unknown evidence differs from a fresh exhausted limit."
+      - "Applying Rank's weekly ceiling or mandatory weekly evidence to cockpit display: Assess intentionally leaves required-window rules with the caller."
+      - "Treating the first ranked seat as atomically reserved, or assuming Busy fences interactive clients: the caller owns durable occupancy admission."
+      - "Feeding duplicate public identities and picking the first: Rank makes every duplicate for that identity ineligible."
+    related_packages: []
+
   sidecar:
     name: "github.com/growth-labs/packages-go/sidecar"
     summary: "Dependency-free reader/validator for the WH-08 sidecar cut record (component-cut.json): store, kind, cut identity, capturedAt, schema version, writer generation, control-log sequence/hash, cross-store cursors, and the encrypted-owner-cut ciphertext identity/recipients/plaintext-file inventory."

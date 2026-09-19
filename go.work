@@ -12,6 +12,7 @@ use (
 	./packaging
 	./pg
 	./s3
+	./seatpolicy
 	./sidecar
 	./synthetictraffic
 	./testkit

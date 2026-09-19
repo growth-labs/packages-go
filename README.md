@@ -28,6 +28,8 @@ Current modules:
   (path-style or virtual-hosted): streamed Range-forwarding Get,
   prefix-scoped List/Delete, small-payload Put, and PutStream (automatic
   multipart with read-back verification).
+- `seatpolicy` — pure assessment of timestamped quota windows and deterministic
+  ranking of known public coding-seat candidates; occupancy stays with callers.
 - `sidecar` — dependency-free reader/validator for the WH-08 sidecar cut
   record (`component-cut.json`): store, kind, cut identity, capturedAt,
   schema version, writer generation, control-log sequence/hash, cross-store

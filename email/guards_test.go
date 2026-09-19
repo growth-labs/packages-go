@@ -77,6 +77,24 @@ func TestProviderRejectionGuardIsFalsifiableAtSend(t *testing.T) {
 	})
 }
 
+func TestMissingVerdictGuardIsFalsifiableAtSend(t *testing.T) {
+	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
+		// Unsafe case: the response body carries no "success" key at all.
+		// With the guard removed (the fake reporting an explicit
+		// success:true and the recipient queued instead), the identical
+		// call succeeds -- proving the missing-verdict check, not
+		// something else, is what fails the unsafe case.
+		fake := newFakeCloudflareServer(t)
+		if mutation.GuardsDisabled() {
+			fake.responseBody = `{"success":true,"result":{"queued":["someone@example.org"]}}`
+		} else {
+			fake.responseBody = `{}`
+		}
+		_, err := fake.client(t).Send(context.Background(), []string{"someone@example.org"}, "subject", "body")
+		return err
+	})
+}
+
 func TestRecipientAcceptanceGuardIsFalsifiableAtSend(t *testing.T) {
 	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
 		// Unsafe case: Cloudflare reports success:true overall but the

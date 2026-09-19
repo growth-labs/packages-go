@@ -260,6 +260,40 @@ func TestSendSurfacesMalformedBodyAsAmbiguous(t *testing.T) {
 	}
 }
 
+// Round-2 review finding PG-37-2: a syntactically valid response that
+// never actually gives a verdict is not proof of rejection. A JSON body
+// parses cleanly with no "success" key, or an explicit null, and must
+// stay ambiguous exactly like a malformed one. Likewise, a success:true
+// paired with a status code this endpoint does not document is not a
+// confirmed acceptance either -- only HTTP 200 with an explicit
+// success:true is the documented, trusted success shape.
+func TestSendTreatsAMissingOrUnexpectedVerdictAsAmbiguous(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"success key absent, HTTP 200", http.StatusOK, `{}`},
+		{"success explicitly null, HTTP 200", http.StatusOK, `{"success":null}`},
+		{"success true at an undocumented status, HTTP 202", http.StatusAccepted, `{"success":true,"result":{"queued":["a@b.com"]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeCloudflareServer(t)
+			fake.status = tc.status
+			fake.responseBody = tc.body
+			client := fake.client(t)
+
+			_, err := client.Send(context.Background(), []string{"a@b.com"}, "t", "m")
+			if err == nil {
+				t.Fatal("Send treated a missing or unexpected verdict as a confirmed success")
+			}
+			if IsUnsubmitted(err) {
+				t.Fatal("a missing or unexpected verdict must stay ambiguous, never proven unsubmitted -- it is not evidence of rejection either")
+			}
+		})
+	}
+}
+
 // Reviewer finding PG-37-1: Cloudflare can report success:true overall
 // while one or more requested recipients bounced or were otherwise never
 // accepted. That must never look like a plain success, and a mixed
@@ -286,16 +320,37 @@ func TestSendReturnsRecipientErrorForABounce(t *testing.T) {
 	}
 }
 
-func TestSendReturnsRecipientErrorWhenARecipientIsUnaccountedFor(t *testing.T) {
-	// Cloudflare's documented response schema has no separate "suppressed"
-	// field -- a suppression-list rejection (or any other outcome the
-	// schema does not name) surfaces as a requested recipient absent from
-	// every list. Treat that the same as a bounce: never silently fine.
+func TestSendReturnsRecipientErrorForASuppressedRecipient(t *testing.T) {
 	fake := newFakeCloudflareServer(t)
-	fake.responseBody = `{"success":true,"result":{"delivered":[],"queued":[],"permanent_bounces":[],"message_id":"cf-id"}}`
+	fake.responseBody = `{"success":true,"result":{"delivered":[],"queued":[],"permanent_bounces":[],"suppressed_recipients":["suppressed@example.org"],"message_id":"cf-id"}}`
 	client := fake.client(t)
 
 	_, err := client.Send(context.Background(), []string{"suppressed@example.org"}, "t", "m")
+	if err == nil {
+		t.Fatal("Send reported success for a suppressed recipient")
+	}
+	var recipientErr *RecipientError
+	if !errors.As(err, &recipientErr) {
+		t.Fatalf("error = %v, want a *RecipientError", err)
+	}
+	if len(recipientErr.Suppressed) != 1 || recipientErr.Suppressed[0] != "suppressed@example.org" {
+		t.Fatalf("Suppressed = %v", recipientErr.Suppressed)
+	}
+	if IsUnsubmitted(err) {
+		t.Fatal("a suppression must never be classified as safe to blanket-resend")
+	}
+}
+
+func TestSendReturnsRecipientErrorWhenARecipientIsUnaccountedFor(t *testing.T) {
+	// A requested recipient absent from every list -- not delivered, not
+	// queued, not bounced, not suppressed -- is an outcome the documented
+	// schema does not name. Treat that the same as a bounce: never
+	// silently fine.
+	fake := newFakeCloudflareServer(t)
+	fake.responseBody = `{"success":true,"result":{"delivered":[],"queued":[],"permanent_bounces":[],"suppressed_recipients":[],"message_id":"cf-id"}}`
+	client := fake.client(t)
+
+	_, err := client.Send(context.Background(), []string{"unaccounted@example.org"}, "t", "m")
 	if err == nil {
 		t.Fatal("Send reported success for a recipient absent from every result list")
 	}
@@ -303,7 +358,7 @@ func TestSendReturnsRecipientErrorWhenARecipientIsUnaccountedFor(t *testing.T) {
 	if !errors.As(err, &recipientErr) {
 		t.Fatalf("error = %v, want a *RecipientError", err)
 	}
-	if len(recipientErr.Unaccepted) != 1 || recipientErr.Unaccepted[0] != "suppressed@example.org" {
+	if len(recipientErr.Unaccepted) != 1 || recipientErr.Unaccepted[0] != "unaccounted@example.org" {
 		t.Fatalf("Unaccepted = %v", recipientErr.Unaccepted)
 	}
 	if IsUnsubmitted(err) {

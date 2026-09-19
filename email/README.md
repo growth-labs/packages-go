@@ -40,17 +40,31 @@ messageID, err := client.Send(ctx, []string{"someone@example.net"}, subject, bod
 
 - **Loud failure, not a silent no-op.** `New` validates the account id, API
   token, and from address up front, so a misconfiguration is a boot-time
-  error. A provider-reported rejection (Cloudflare `success: false`, or any
-  non-2xx response) is always surfaced as an error carrying the provider's
-  own code and message -- never swallowed into an apparent success.
-- **Retry safety is evidence-based.** `IsUnsubmitted(err)` is true only when
-  the transport proves no message was submitted: a dial/DNS failure before
-  any bytes went out, a rate limit, or a provider-reported rejection (a real
-  HTTP response is always Cloudflare's own verdict, proven either way, never
-  ambiguous). A genuine network error while a request was already in flight
-  (for example a timeout mid-response) is deliberately *not* marked: the
-  message may already have been accepted, so retrying it automatically could
-  double-send.
+  error. A provider-reported rejection (an HTTP response that parses and
+  carries an explicit `success: false`) is always surfaced as an error
+  carrying the provider's own code and message -- never swallowed into an
+  apparent success.
+- **A per-recipient failure is never a plain success.** Cloudflare's
+  `success: true` envelope can still report one or more requested
+  recipients as a permanent bounce, on the account's suppression list, or
+  simply absent from every list it names. Any of those returns a
+  `*RecipientError` naming exactly which recipients failed and how --
+  distinct from `IsUnsubmitted`, so a mixed outcome (some recipients
+  accepted, one dropped) can never look safe to blanket-resend the whole
+  list.
+- **Retry safety is evidence-based, and ambiguity is preserved, not
+  guessed away.** `IsUnsubmitted(err)` is true only when the transport
+  proves no message was submitted: a dial/DNS failure before any bytes
+  went out, a rate limit, or a structured, explicit `success: false`
+  rejection. Everything else that cannot be proven either way stays
+  ambiguous: a 5xx (Cloudflare's own gateway/edge failing, not its
+  application logic answering), a response body that fails to read or
+  parse, and a response that never gives an explicit verdict at all (no
+  `success` key, an explicit `null`, or a `success: true` paired with a
+  status code this endpoint does not document). A genuine network error
+  while a request was already in flight (for example a timeout
+  mid-response) is likewise never marked: the message may already have
+  been accepted, so retrying it automatically could double-send.
 - **Rate limits have typed evidence.** Use `errors.As` with
   `*email.RateLimitError` for `StatusCode` and the `RetryAfter` duration
   (HTTP seconds/date, capped at 24 hours; zero means absent, invalid, or

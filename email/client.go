@@ -171,7 +171,11 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 		return "", fmt.Errorf("email: decode response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK || !parsed.Success {
+	switch {
+	case parsed.Success != nil && !*parsed.Success:
+		// An explicit, structured rejection -- proven, regardless of HTTP
+		// status. Cloudflare documents rejecting requests this way at
+		// several status codes, not only 200.
 		message, code := firstCloudflareMessage(parsed)
 		if message == "" {
 			message = fmt.Sprintf("http %d", resp.StatusCode)
@@ -183,36 +187,53 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 			return "", Unsubmitted(fmt.Errorf("email: provider rejected send (%s): %s", code, message))
 		}
 		return "", Unsubmitted(fmt.Errorf("email: provider rejected send: %s", message))
+	case resp.StatusCode == http.StatusOK && parsed.Success != nil && *parsed.Success:
+		// The one documented, confirmed success shape: HTTP 200 with an
+		// explicit success:true. A parsed, successful envelope can still
+		// carry a per-recipient failure -- Cloudflare reports
+		// delivered/queued acceptance, permanent bounces, and suppressed
+		// recipients per address, not just one blanket verdict. A page
+		// dropped for one recipient must never look identical to a page
+		// that reached everyone.
+		if err := verifyAllRecipientsAccepted(to, parsed.Result); err != nil {
+			return "", err
+		}
+		return messageID, nil
+	default:
+		// Anything else proves nothing either way: success missing or
+		// null (no verdict was ever given), or a success:true paired with
+		// a status code this endpoint does not document (an unexplained
+		// combination is not evidence of acceptance either). Never
+		// classify this as proven-unsubmitted -- an ambiguous outcome
+		// that later turns out to have been accepted must never be
+		// automatically resent.
+		return "", fmt.Errorf("email: provider response carried no confirmed verdict (http %d): %s", resp.StatusCode, truncateForError(rawBody))
 	}
-
-	// A parsed, successful envelope can still carry a per-recipient
-	// failure: Cloudflare reports delivered/queued acceptance and permanent
-	// bounces per address, not just one blanket verdict. A page dropped
-	// for one recipient must never look identical to a page that reached
-	// everyone.
-	if err := verifyAllRecipientsAccepted(to, parsed.Result); err != nil {
-		return "", err
-	}
-
-	return messageID, nil
 }
 
-// cloudflareResponse models Cloudflare's REST envelope for send_raw:
-// success/errors/messages plus the per-recipient Result the official
-// Cloudflare TypeScript SDK types as EmailSendingSendRawResponse
-// (delivered, queued, permanent_bounces, message_id).
+// cloudflareResponse models Cloudflare's REST envelope for send_raw.
+// Success is a pointer so a response carrying no "success" key at all,
+// or an explicit JSON null, is distinguishable from an explicit false --
+// only an explicit false is proof of rejection; a missing verdict is
+// ambiguous, never proof of anything.
 type cloudflareResponse struct {
-	Success  bool                  `json:"success"`
+	Success  *bool                 `json:"success"`
 	Errors   []cloudflareMessage   `json:"errors"`
 	Messages []cloudflareMessage   `json:"messages"`
 	Result   *cloudflareSendResult `json:"result"`
 }
 
+// cloudflareSendResult is send_raw's per-recipient result. The official
+// Cloudflare TypeScript SDK types the base shape as EmailSendingSendRawResponse
+// (delivered, queued, permanent_bounces, message_id); the current
+// Cloudflare API reference additionally documents suppressed_recipients
+// for addresses on the account's suppression list.
 type cloudflareSendResult struct {
-	Delivered        []string `json:"delivered"`
-	Queued           []string `json:"queued"`
-	PermanentBounces []string `json:"permanent_bounces"`
-	MessageID        string   `json:"message_id"`
+	Delivered            []string `json:"delivered"`
+	Queued               []string `json:"queued"`
+	PermanentBounces     []string `json:"permanent_bounces"`
+	SuppressedRecipients []string `json:"suppressed_recipients"`
+	MessageID            string   `json:"message_id"`
 }
 
 type cloudflareMessage struct {
@@ -241,33 +262,39 @@ type RecipientError struct {
 	// Bounced lists requested recipients Cloudflare reported as a
 	// permanent bounce.
 	Bounced []string
+	// Suppressed lists requested recipients Cloudflare reported as on the
+	// account's suppression list.
+	Suppressed []string
 	// Unaccepted lists requested recipients Cloudflare's result did not
-	// report as delivered, queued, or bounced at all (for example, a
-	// suppression-list rejection, which the official response schema does
-	// not expose as its own field).
+	// report as delivered, queued, bounced, or suppressed at all.
 	Unaccepted []string
 }
 
 func (e *RecipientError) Error() string {
-	switch {
-	case len(e.Bounced) > 0 && len(e.Unaccepted) > 0:
-		return fmt.Sprintf("email: provider bounced %v and never accounted for %v", e.Bounced, e.Unaccepted)
-	case len(e.Bounced) > 0:
-		return fmt.Sprintf("email: provider permanently bounced %v", e.Bounced)
-	default:
-		return fmt.Sprintf("email: provider never confirmed acceptance for %v", e.Unaccepted)
+	var parts []string
+	if len(e.Bounced) > 0 {
+		parts = append(parts, fmt.Sprintf("bounced %v", e.Bounced))
 	}
+	if len(e.Suppressed) > 0 {
+		parts = append(parts, fmt.Sprintf("suppressed %v", e.Suppressed))
+	}
+	if len(e.Unaccepted) > 0 {
+		parts = append(parts, fmt.Sprintf("never accounted for %v", e.Unaccepted))
+	}
+	return "email: provider " + strings.Join(parts, " and ")
 }
 
 // verifyAllRecipientsAccepted requires every requested recipient to appear
 // in the result's delivered or queued lists. A recipient absent from every
-// list -- not delivered, not queued, not even reported bounced -- is
-// treated the same as an explicit bounce: unaccepted, not silently fine.
-// A nil result (the response parsed but carried no per-recipient data at
-// all) fails every requested recipient rather than assuming success.
+// list -- not delivered, not queued, not even reported bounced or
+// suppressed -- is treated the same as an explicit bounce: unaccepted, not
+// silently fine. A nil result (the response parsed but carried no
+// per-recipient data at all) fails every requested recipient rather than
+// assuming success.
 func verifyAllRecipientsAccepted(requested []string, result *cloudflareSendResult) error {
 	accepted := make(map[string]bool, len(requested))
 	bounced := make(map[string]bool)
+	suppressed := make(map[string]bool)
 	if result != nil {
 		for _, r := range result.Delivered {
 			accepted[r] = true
@@ -278,21 +305,26 @@ func verifyAllRecipientsAccepted(requested []string, result *cloudflareSendResul
 		for _, r := range result.PermanentBounces {
 			bounced[r] = true
 		}
+		for _, r := range result.SuppressedRecipients {
+			suppressed[r] = true
+		}
 	}
-	var bouncedOut, unacceptedOut []string
+	var bouncedOut, suppressedOut, unacceptedOut []string
 	for _, r := range requested {
 		switch {
 		case bounced[r]:
 			bouncedOut = append(bouncedOut, r)
+		case suppressed[r]:
+			suppressedOut = append(suppressedOut, r)
 		case accepted[r]:
 		default:
 			unacceptedOut = append(unacceptedOut, r)
 		}
 	}
-	if len(bouncedOut) == 0 && len(unacceptedOut) == 0 {
+	if len(bouncedOut) == 0 && len(suppressedOut) == 0 && len(unacceptedOut) == 0 {
 		return nil
 	}
-	return &RecipientError{Bounced: bouncedOut, Unaccepted: unacceptedOut}
+	return &RecipientError{Bounced: bouncedOut, Suppressed: suppressedOut, Unaccepted: unacceptedOut}
 }
 
 // truncateForError bounds a provider response body embedded in an error

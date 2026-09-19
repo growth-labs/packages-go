@@ -62,12 +62,12 @@ const (
 // identifiers there, but principal kids are this package's concern).
 var PrincipalKIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
-// maxSafeInteger bounds the integers CanonicalMarshal accepts, matching
+// maxSafeInteger bounds the integers canonicalMarshal accepts, matching
 // canonicaljson's cross-language safe-integer rule on the Go side.
 const maxSafeInteger = int64(1<<53 - 1)
 
 // Proof is the exact JSON shape foundryd's onlinewire.OperatorProofValue
-// decodes. Field order here is irrelevant — CanonicalMarshal sorts keys —
+// decodes. Field order here is irrelevant — canonicalMarshal sorts keys —
 // but the field set, names and omitempty on NormalizedQuery must stay
 // byte-identical to the verifier's expectation.
 type Proof struct {
@@ -98,14 +98,13 @@ func RandomNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// CanonicalMarshal encodes value the way foundryd's canonicaljson.
-// Canonicalize does: object keys sorted by plain codepoint order, no
-// inserted whitespace, integers only (this protocol never signs a
-// fractional number). It round-trips through encoding/json first so
-// struct tags (json:"...,omitempty") are honoured before canonicalization,
-// exactly as quarry's copy of this algorithm has run in production since
-// W6-01.
-func CanonicalMarshal(value any) ([]byte, error) {
+// canonicalMarshal is private to Sign's fixed Proof shape. It preserves
+// Quarry's byte-order encoding of those ASCII field names, whose order agrees
+// with foundryd's en-US collation. It is NOT a general Foundry request-body
+// canonicalizer: arbitrary keys (for example "a" and "B") sort differently.
+// encoding/json first applies struct tags and omitempty; the remaining pass
+// emits compact JSON without HTML escaping and accepts only safe integers.
+func canonicalMarshal(value any) ([]byte, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -239,7 +238,7 @@ func Sign(key ed25519.PrivateKey, principalKID, method, normalizedPath, normaliz
 	}
 	digest := sha256.Sum256(body)
 	signingTime := now.UTC()
-	proofBytes, err := CanonicalMarshal(Proof{
+	proofBytes, err := canonicalMarshal(Proof{
 		Protocol:        Protocol,
 		PrincipalKID:    principalKID,
 		Nonce:           nonceValue,

@@ -12,7 +12,7 @@ import (
 )
 
 func TestCanonicalMarshalSortsKeysAndOmitsWhitespace(t *testing.T) {
-	got, err := CanonicalMarshal(map[string]any{"b": 1, "a": "x", "c": true})
+	got, err := canonicalMarshal(map[string]any{"b": 1, "a": "x", "c": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,8 +21,20 @@ func TestCanonicalMarshalSortsKeysAndOmitsWhitespace(t *testing.T) {
 	}
 }
 
+func TestPrivateMarshalMixedCaseIsNotFoundryBodyCanonicalization(t *testing.T) {
+	got, err := canonicalMarshal(map[string]any{"a": 1, "B": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately byte order, unlike the verifier's general en-US collation.
+	// Keep this helper private; Sign uses only Proof's fixed field names.
+	if string(got) != `{"B":2,"a":1}` {
+		t.Fatalf("got %s", got)
+	}
+}
+
 func TestCanonicalMarshalEscapesControlAndPassesUnicode(t *testing.T) {
-	got, err := CanonicalMarshal(map[string]any{"s": "line\nbreak\ttab\x01ctrl\"quote\\back é 日"})
+	got, err := canonicalMarshal(map[string]any{"s": "line\nbreak\ttab\x01ctrl\"quote\\back é 日"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,13 +46,13 @@ func TestCanonicalMarshalEscapesControlAndPassesUnicode(t *testing.T) {
 
 func TestCanonicalMarshalRejectsUnsafeInteger(t *testing.T) {
 	// 2^53, one past the largest safe integer.
-	if _, err := CanonicalMarshal(map[string]any{"n": int64(1) << 53}); err == nil {
+	if _, err := canonicalMarshal(map[string]any{"n": int64(1) << 53}); err == nil {
 		t.Fatal("expected an error for an unsafe integer, got nil")
 	}
 }
 
 func TestCanonicalMarshalOmitsEmptyOmitemptyField(t *testing.T) {
-	got, err := CanonicalMarshal(Proof{Protocol: Protocol, NormalizedQuery: ""})
+	got, err := canonicalMarshal(Proof{Protocol: Protocol, NormalizedQuery: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +95,7 @@ func TestRandomNonceIsValid(t *testing.T) {
 
 // TestSignMatchesTheExactCanonicalWireFormat is a fixed-input fixture: the
 // expected canonical proof bytes are built independently (a literal string,
-// not through CanonicalMarshal), so this catches any drift in field
+// not through canonicalMarshal), so this catches any drift in field
 // set/order/encoding from the format foundryd's canonicaljson.Canonicalize
 // and the JS twin (kb-transport.mjs canonicalizeJson) both produce.
 func TestSignMatchesTheExactCanonicalWireFormat(t *testing.T) {

@@ -1125,6 +1125,14 @@ Auth endpoint Worker — verifies operator CF tokens and returns the canonical a
 **Provides**
 - Agent auth endpoint: verifies operator Cloudflare tokens and returns the canonical agent token
 
+### Cockpit (`fulcrum-labs/cockpit`, stream `hub`)
+
+Per-host ACP session owner, tailnet hub, and unified operator workspace
+
+**Provides**
+- Per-host session owner: ACP client, controlled launch, delivery/recovery records, operator-action audit
+- Tailnet hub: authenticated aggregation and the unified operator workspace UI
+
 ### Foundry (`fulcrum-labs/foundry`, stream `hub`)
 
 Substrate-neutral Go execution kernel and eventual primary Foundry
@@ -1527,10 +1535,10 @@ The TypeScript Foundry on Cloudflare (`fulcrum-labs/the-foundry`) is frozen. Its
 
 ## Provenance
 
-Generated 2026-09-19T06:29:05.661Z from:
+Generated 2026-09-19T09:05:34.143Z from:
 
-- `growth-labs/packages` — https://github.com/growth-labs/packages @ `25e66724b45e973b76711dae994690d06b15766a` (observed 2026-09-19T06:29:05.661Z)
-- `growth-labs/publishing` — https://github.com/growth-labs/publishing @ `61cd667e195f07b808a9c9e1ff8b9509b4b5406f` (observed 2026-09-19T06:29:05.661Z)
-- `growth-labs/packages-go` — https://github.com/growth-labs/packages-go @ `584593911e3f5680d3a0b33be76f6aa5f6899b3b` (observed 2026-09-19T06:29:05.661Z)
-- `fulcrum-labs/foundry` — https://github.com/fulcrum-labs/foundry @ `1a568c232f0cb4c1c517cd4f77f8e160e2f10f97` (observed 2026-09-19T06:29:05.661Z)
-- `fulcrum-labs/platform-foundations` — https://github.com/fulcrum-labs/platform-foundations @ `b2dfbb1176eb565c781a2e4add607f67959318da` (observed 2026-09-19T06:29:05.661Z)
+- `growth-labs/packages` — https://github.com/growth-labs/packages @ `1bf0a542726306c1fea703a4d44faf74f5bc2041` (observed 2026-09-19T09:05:34.143Z)
+- `growth-labs/publishing` — https://github.com/growth-labs/publishing @ `7a518eea1c621d8d61931c71bc298cfabcd307a3` (observed 2026-09-19T09:05:34.143Z)
+- `growth-labs/packages-go` — https://github.com/growth-labs/packages-go @ `37e723f8717feead175580a5314edc4e0ade11c8` (observed 2026-09-19T09:05:34.143Z)
+- `fulcrum-labs/foundry` — https://github.com/fulcrum-labs/foundry @ `19f238d2dd1ae69b84050145ffcb7eca2e17d17b` (observed 2026-09-19T09:05:34.143Z)
+- `fulcrum-labs/platform-foundations` — https://github.com/fulcrum-labs/platform-foundations @ `96c16ef5d40335b9c8dd284ebe3a2fb6ad6145ec` (observed 2026-09-19T09:05:34.143Z)

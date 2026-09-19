@@ -19,19 +19,19 @@ go get github.com/growth-labs/packages-go/email
 - Workers-runtime (TypeScript) services: those use `@growth-labs/email` and
   `@growth-labs/mailer`.
 - Sending as a specific person's own mailbox. This client always sends as
-  one configured estate address; if a consumer ever needs that, it needs a
+  one configured sender address; if a consumer ever needs that, it needs a
   different transport, not this one (see "What this does not do" below).
 
 ## Shape
 
 ```go
-token, err := email.LoadTokenFile("/etc/foundry/secrets/cloudflare-email.token")
+token, err := email.LoadTokenFile("/etc/myservice/secrets/cloudflare-email.token")
 client, err := email.New(email.Config{
-	AccountID: "b8fd8daf73edd8fe6b6bd18eeaacf2bb", // not secret
+	AccountID: "<your Cloudflare account id>", // not secret
 	APIToken:  token,
-	From:      "foundry-alerts@fulcrum-portal.com",
+	From:      "alerts@example.org",
 }, &http.Client{Timeout: 30 * time.Second})
-messageID, err := client.Send(ctx, []string{"someone@fulcrum-labs.com"}, subject, body)
+messageID, err := client.Send(ctx, []string{"someone@example.net"}, subject, body)
 ```
 
 `example_test.go` is the complete worked example.
@@ -82,9 +82,9 @@ API in `client_test.go`.
 
 | Value | Where it lives |
 | --- | --- |
-| Cloudflare API token (Email Sending scope) | mode-0600 file on the host; the value's home is Vaultwarden |
-| Cloudflare account id | not secret; the estate's Fulcrum account is `b8fd8daf73edd8fe6b6bd18eeaacf2bb` |
-| From address | not secret; must be on a domain already onboarded to Cloudflare Email Sending on that account (`fulcrum-portal.com` is, as of 2026-09) -- `fulcrum-labs.com` is on Google Workspace and is NOT onboarded, so never send from it via this client |
+| Cloudflare API token (Email Sending scope) | mode-0600 file on the host; the value's home is your own secret store |
+| Cloudflare account id | not secret; your deployment's own Cloudflare account id |
+| From address | not secret; must be on a domain already onboarded to Cloudflare Email Sending on that account -- a domain that only has Cloudflare Email *Routing* (inbound) enabled is a different product and is not onboarded for sending |
 | Recipients | the caller's own configuration; this package holds no lists |
 
 No value is ever compiled in, and this package holds no durable state:

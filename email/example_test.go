@@ -24,15 +24,15 @@ import (
 // behaviour it shows is covered against a fake Cloudflare API in
 // client_test.go.
 func Example() {
-	token, err := email.LoadTokenFile("/etc/foundry/secrets/cloudflare-email.token")
+	token, err := email.LoadTokenFile("/etc/myservice/secrets/cloudflare-email.token")
 	if err != nil {
 		log.Fatalf("load Cloudflare Email Sending token: %v", err)
 	}
 
 	client, err := email.New(email.Config{
-		AccountID: "b8fd8daf73edd8fe6b6bd18eeaacf2bb",
+		AccountID: "deadbeefdeadbeefdeadbeefdeadbeef",
 		APIToken:  token,
-		From:      "foundry-alerts@fulcrum-portal.com",
+		From:      "alerts@example.org",
 	}, &http.Client{Timeout: 30 * time.Second})
 	if err != nil {
 		log.Fatalf("build email client: %v", err)
@@ -40,9 +40,9 @@ func Example() {
 
 	ctx := context.Background()
 	messageID, err := client.Send(ctx,
-		[]string{"someone@fulcrum-labs.com"},
+		[]string{"someone@example.net"},
 		"Deploy finished",
-		"foundryd reached revision abc1234 on CT240.",
+		"the service reached revision abc1234 on host-1.",
 	)
 	if err != nil {
 		// Only an Unsubmitted error proves nothing was sent, so only it is

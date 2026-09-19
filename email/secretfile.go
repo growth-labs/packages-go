@@ -9,7 +9,7 @@ import (
 // LoadTokenFile reads a Cloudflare Email Sending API token from a
 // mode-0600 file holding exactly one non-empty line -- the estate's
 // convention for a single-value operational secret on a service host
-// (for example /etc/foundry/secrets/cloudflare-email.token).
+// (for example /etc/myservice/secrets/cloudflare-email.token).
 //
 // The mode check is a guard, not a formality: a token readable by every
 // account on the host is the same failure as a token in the repository.

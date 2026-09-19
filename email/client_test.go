@@ -12,7 +12,7 @@ import (
 )
 
 func validConfig() Config {
-	return Config{AccountID: "acct1", APIToken: "cf-token", From: "alerts@fulcrum-portal.com"}
+	return Config{AccountID: "acct1", APIToken: "cf-token", From: "alerts@example.org"}
 }
 
 func TestNewRejectsMissingConfig(t *testing.T) {
@@ -67,7 +67,15 @@ func newFakeCloudflareServer(t *testing.T) *fakeCloudflareServer {
 			_, _ = w.Write([]byte(fake.responseBody))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": fake.success})
+		result := map[string]any{"message_id": "cf-assigned-id"}
+		if fake.success {
+			// Default happy path: every requested recipient is accepted.
+			// Tests that need a bounce or a mixed outcome set responseBody
+			// explicitly instead of relying on this default.
+			recipients, _ := fake.gotBody["recipients"].([]any)
+			result["queued"] = recipients
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": fake.success, "result": result})
 	}))
 	t.Cleanup(fake.server.Close)
 	return fake
@@ -88,7 +96,7 @@ func TestSendPostsRawMimeToSendRawEndpoint(t *testing.T) {
 	client := fake.client(t)
 
 	messageID, err := client.Send(context.Background(),
-		[]string{"grant@fulcrum-labs.com", "alias@pushover.example"}, "foundry publish test", "body text")
+		[]string{"someone@example.net", "alias@pushover.example"}, "example publish test", "body text")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,18 +109,18 @@ func TestSendPostsRawMimeToSendRawEndpoint(t *testing.T) {
 	if fake.gotPath != "/accounts/acct1/email/sending/send_raw" {
 		t.Fatalf("path = %q", fake.gotPath)
 	}
-	if fake.gotBody["from"] != "alerts@fulcrum-portal.com" {
+	if fake.gotBody["from"] != "alerts@example.org" {
 		t.Fatalf("from = %v, want the configured sending address, never a caller-supplied one", fake.gotBody["from"])
 	}
 	recipients, ok := fake.gotBody["recipients"].([]any)
-	if !ok || len(recipients) != 2 || recipients[0] != "grant@fulcrum-labs.com" {
+	if !ok || len(recipients) != 2 || recipients[0] != "someone@example.net" {
 		t.Fatalf("recipients = %+v", fake.gotBody["recipients"])
 	}
 	raw, ok := fake.gotBody["mime_message"].(string)
-	if !ok || !strings.Contains(raw, "Subject: foundry publish test") {
+	if !ok || !strings.Contains(raw, "Subject: example publish test") {
 		t.Fatalf("mime_message missing subject: %q", raw)
 	}
-	if !strings.Contains(raw, "From: alerts@fulcrum-portal.com") {
+	if !strings.Contains(raw, "From: alerts@example.org") {
 		t.Fatalf("mime_message missing From header: %q", raw)
 	}
 	if !strings.Contains(raw, "Message-ID: <"+messageID+">") {
@@ -144,7 +152,7 @@ func TestSendWithMessageIDRejectsHeaderInjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, messageID := range []string{"", "id\r\nBcc: someone@example.com", "<id@fulcrum-labs.com>"} {
+	for _, messageID := range []string{"", "id\r\nBcc: someone@example.com", "<id@example.net>"} {
 		if _, err := client.SendWithMessageID(context.Background(), []string{"a@b.com"}, "s", "b", messageID); err == nil {
 			t.Fatalf("SendWithMessageID accepted Message-ID %q", messageID)
 		}
@@ -187,21 +195,147 @@ func TestSendSurfacesProviderErrorLoudly(t *testing.T) {
 	}
 }
 
-func TestSendSurfacesHTTPErrorWithNoJSONBody(t *testing.T) {
+// A 5xx is Cloudflare's gateway failing, not its application logic
+// answering: the request may already have been accepted upstream before
+// the gateway lost the response. This must never be classified as proven
+// unsubmitted, no matter what the (if any) body says -- reviewer finding
+// PG-37-2.
+func TestSendSurfacesGatewayErrorAsAmbiguous(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"no body", ""},
+		{"non-JSON body", "upstream failure"},
+		{"well-formed rejection body", `{"success":false,"errors":[{"code":1000,"message":"internal error"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeCloudflareServer(t)
+			fake.status = http.StatusBadGateway
+			fake.responseBody = tc.body
+			client := fake.client(t)
+
+			_, err := client.Send(context.Background(), []string{"a@b.com"}, "t", "m")
+			if err == nil {
+				t.Fatal("Send swallowed a 502 gateway response")
+			}
+			if !strings.Contains(err.Error(), "502") {
+				t.Fatalf("error = %v, want the HTTP status surfaced", err)
+			}
+			if IsUnsubmitted(err) {
+				t.Fatal("a gateway failure must stay ambiguous, never proven unsubmitted")
+			}
+		})
+	}
+}
+
+// A truncated or malformed body proves nothing either way: it is not
+// evidence the transport rejected the send, so it must not be classified
+// as proven unsubmitted (reviewer finding PG-37-2). The existing HTTP-500
+// test previously pinned the opposite, unsafe classification.
+func TestSendSurfacesMalformedBodyAsAmbiguous(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"malformed JSON, HTTP 200", http.StatusOK, `{"success":true, "result": {`},
+		{"non-JSON body, HTTP 500", http.StatusInternalServerError, "upstream failure"},
+		{"empty body, HTTP 400", http.StatusBadRequest, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeCloudflareServer(t)
+			fake.status = tc.status
+			fake.responseBody = tc.body
+			client := fake.client(t)
+
+			_, err := client.Send(context.Background(), []string{"a@b.com"}, "t", "m")
+			if err == nil {
+				t.Fatal("Send swallowed a malformed/unreadable response")
+			}
+			if IsUnsubmitted(err) {
+				t.Fatal("a malformed or truncated response must stay ambiguous, never proven unsubmitted")
+			}
+		})
+	}
+}
+
+// Reviewer finding PG-37-1: Cloudflare can report success:true overall
+// while one or more requested recipients bounced or were otherwise never
+// accepted. That must never look like a plain success, and a mixed
+// outcome must never be classified as safe to blanket-resend (it would
+// duplicate mail the accepted recipients already have).
+func TestSendReturnsRecipientErrorForABounce(t *testing.T) {
 	fake := newFakeCloudflareServer(t)
-	fake.status = http.StatusInternalServerError
-	fake.responseBody = "upstream failure"
+	fake.responseBody = `{"success":true,"result":{"delivered":[],"queued":[],"permanent_bounces":["page-fixture@example.org"],"message_id":"cf-id"}}`
 	client := fake.client(t)
 
-	_, err := client.Send(context.Background(), []string{"a@b.com"}, "t", "m")
+	_, err := client.Send(context.Background(), []string{"page-fixture@example.org"}, "example publish test", "body")
 	if err == nil {
-		t.Fatal("Send swallowed a non-2xx response with no JSON body")
+		t.Fatal("Send reported success for a permanently bounced recipient")
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Fatalf("error = %v, want the HTTP status surfaced", err)
+	var recipientErr *RecipientError
+	if !errors.As(err, &recipientErr) {
+		t.Fatalf("error = %v, want a *RecipientError", err)
 	}
-	if !IsUnsubmitted(err) {
-		t.Fatal("a rejected send must be proven unsubmitted")
+	if len(recipientErr.Bounced) != 1 || recipientErr.Bounced[0] != "page-fixture@example.org" {
+		t.Fatalf("Bounced = %v", recipientErr.Bounced)
+	}
+	if IsUnsubmitted(err) {
+		t.Fatal("a bounce must never be classified as safe to blanket-resend")
+	}
+}
+
+func TestSendReturnsRecipientErrorWhenARecipientIsUnaccountedFor(t *testing.T) {
+	// Cloudflare's documented response schema has no separate "suppressed"
+	// field -- a suppression-list rejection (or any other outcome the
+	// schema does not name) surfaces as a requested recipient absent from
+	// every list. Treat that the same as a bounce: never silently fine.
+	fake := newFakeCloudflareServer(t)
+	fake.responseBody = `{"success":true,"result":{"delivered":[],"queued":[],"permanent_bounces":[],"message_id":"cf-id"}}`
+	client := fake.client(t)
+
+	_, err := client.Send(context.Background(), []string{"suppressed@example.org"}, "t", "m")
+	if err == nil {
+		t.Fatal("Send reported success for a recipient absent from every result list")
+	}
+	var recipientErr *RecipientError
+	if !errors.As(err, &recipientErr) {
+		t.Fatalf("error = %v, want a *RecipientError", err)
+	}
+	if len(recipientErr.Unaccepted) != 1 || recipientErr.Unaccepted[0] != "suppressed@example.org" {
+		t.Fatalf("Unaccepted = %v", recipientErr.Unaccepted)
+	}
+	if IsUnsubmitted(err) {
+		t.Fatal("an unaccounted-for recipient must never be classified as safe to blanket-resend")
+	}
+}
+
+func TestSendReturnsRecipientErrorForAMixedOutcome(t *testing.T) {
+	fake := newFakeCloudflareServer(t)
+	fake.responseBody = `{"success":true,"result":{"delivered":["ok@example.org"],"queued":[],"permanent_bounces":["bad@example.org"],"message_id":"cf-id"}}`
+	client := fake.client(t)
+
+	_, err := client.Send(context.Background(), []string{"ok@example.org", "bad@example.org"}, "t", "m")
+	var recipientErr *RecipientError
+	if !errors.As(err, &recipientErr) {
+		t.Fatalf("error = %v, want a *RecipientError", err)
+	}
+	if len(recipientErr.Bounced) != 1 || recipientErr.Bounced[0] != "bad@example.org" {
+		t.Fatalf("Bounced = %v, want only the bounced address, not the delivered one", recipientErr.Bounced)
+	}
+	if IsUnsubmitted(err) {
+		t.Fatal("a mixed outcome must never look safe to blanket-resend the whole recipient list")
+	}
+}
+
+func TestSendSucceedsWhenEveryRecipientIsDeliveredOrQueued(t *testing.T) {
+	fake := newFakeCloudflareServer(t)
+	fake.responseBody = `{"success":true,"result":{"delivered":["a@example.org"],"queued":["b@example.org"],"permanent_bounces":[],"message_id":"cf-id"}}`
+	client := fake.client(t)
+
+	if _, err := client.Send(context.Background(), []string{"a@example.org", "b@example.org"}, "t", "m"); err != nil {
+		t.Fatalf("Send failed for two fully accepted recipients: %v", err)
 	}
 }
 
@@ -263,11 +397,11 @@ func TestRateLimitRequiresTypedEvidence(t *testing.T) {
 }
 
 func TestGenerateMessageIDUsesFromDomain(t *testing.T) {
-	id, err := generateMessageID("alerts@fulcrum-portal.com")
+	id, err := generateMessageID("alerts@example.org")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(id, "@fulcrum-portal.com") {
+	if !strings.HasSuffix(id, "@example.org") {
 		t.Fatalf("id = %q, want it under the from address's own domain", id)
 	}
 	if strings.ContainsAny(id, "<>\r\n") {

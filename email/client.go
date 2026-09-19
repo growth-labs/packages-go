@@ -4,7 +4,9 @@
 // to POST /accounts/{account_id}/email/sending/send_raw as raw MIME.
 // Cloudflare's response is the only delivery evidence there is -- unlike
 // JMAP, there is no mailbox to poll afterward, so a Send call is either
-// proven accepted or proven (or ambiguously) not.
+// proven accepted for every requested recipient, proven not (a rejection,
+// or one or more recipients bounced or otherwise unaccounted for), or
+// ambiguous (a malformed, truncated, or gateway-failed response).
 //
 // The package holds no durable state: budget accounting, retry policy and
 // recipient lists belong to the caller, which has the database connection
@@ -51,7 +53,7 @@ type Config struct {
 	// APIToken is an Email Sending-scoped Cloudflare API token.
 	APIToken string
 	// From is the envelope and header From address, e.g.
-	// "foundry-alerts@fulcrum-portal.com". Its domain must already be
+	// "alerts@example.org". Its domain must already be
 	// onboarded to Cloudflare Email Sending on AccountID's account.
 	From string
 }
@@ -143,23 +145,38 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 	}
 	defer resp.Body.Close()
 
-	// A real HTTP response -- whatever it says -- is Cloudflare's own
-	// verdict on this request, so every path below is proven, not
-	// ambiguous.
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return "", Unsubmitted(&RateLimitError{StatusCode: resp.StatusCode, RetryAfter: retryAfter(resp.Header.Get("Retry-After"))})
 	}
+	// A 5xx is Cloudflare's own gateway/edge failing, not its application
+	// logic answering -- the request may or may not have reached the part
+	// of the system that would have accepted it. This is exactly the "502
+	// with a lost upstream response" case: never proven-unsubmitted, no
+	// matter what the body says.
+	if resp.StatusCode >= 500 {
+		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return "", fmt.Errorf("email: provider gateway error http %d: %s", resp.StatusCode, truncateForError(rawBody))
+	}
 
-	rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		// The body itself was cut off mid-transfer: whatever verdict
+		// Cloudflare intended never fully arrived, so this proves nothing.
+		return "", fmt.Errorf("email: read response: %w", readErr)
+	}
 	var parsed cloudflareResponse
-	_ = json.Unmarshal(rawBody, &parsed)
+	if err := json.Unmarshal(rawBody, &parsed); err != nil {
+		// A malformed or truncated body is not evidence either way -- the
+		// one thing it is NOT is proof that nothing was submitted.
+		return "", fmt.Errorf("email: decode response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK || !parsed.Success {
 		message, code := firstCloudflareMessage(parsed)
 		if message == "" {
 			message = fmt.Sprintf("http %d", resp.StatusCode)
 			if len(rawBody) > 0 {
-				message = fmt.Sprintf("%s: %s", message, strings.TrimSpace(string(rawBody)))
+				message = fmt.Sprintf("%s: %s", message, truncateForError(rawBody))
 			}
 		}
 		if code != "" {
@@ -168,16 +185,34 @@ func (c *Client) SendWithMessageID(ctx context.Context, to []string, subject, bo
 		return "", Unsubmitted(fmt.Errorf("email: provider rejected send: %s", message))
 	}
 
+	// A parsed, successful envelope can still carry a per-recipient
+	// failure: Cloudflare reports delivered/queued acceptance and permanent
+	// bounces per address, not just one blanket verdict. A page dropped
+	// for one recipient must never look identical to a page that reached
+	// everyone.
+	if err := verifyAllRecipientsAccepted(to, parsed.Result); err != nil {
+		return "", err
+	}
+
 	return messageID, nil
 }
 
-// cloudflareResponse models just enough of Cloudflare's REST envelope
-// (success/errors/messages) to surface the first provider-reported reason
-// for a rejected send.
+// cloudflareResponse models Cloudflare's REST envelope for send_raw:
+// success/errors/messages plus the per-recipient Result the official
+// Cloudflare TypeScript SDK types as EmailSendingSendRawResponse
+// (delivered, queued, permanent_bounces, message_id).
 type cloudflareResponse struct {
-	Success  bool                `json:"success"`
-	Errors   []cloudflareMessage `json:"errors"`
-	Messages []cloudflareMessage `json:"messages"`
+	Success  bool                  `json:"success"`
+	Errors   []cloudflareMessage   `json:"errors"`
+	Messages []cloudflareMessage   `json:"messages"`
+	Result   *cloudflareSendResult `json:"result"`
+}
+
+type cloudflareSendResult struct {
+	Delivered        []string `json:"delivered"`
+	Queued           []string `json:"queued"`
+	PermanentBounces []string `json:"permanent_bounces"`
+	MessageID        string   `json:"message_id"`
 }
 
 type cloudflareMessage struct {
@@ -193,6 +228,83 @@ func firstCloudflareMessage(r cloudflareResponse) (message, code string) {
 		return entry.Message, entry.Code.String()
 	}
 	return "", ""
+}
+
+// RecipientError is proven per-recipient evidence of a dropped send: some
+// or all of the requested recipients were not accepted. It never satisfies
+// IsUnsubmitted -- a mixed outcome (some recipients delivered, one
+// bounced) must never look safe to blanket-resend, since resending would
+// duplicate the mail the accepted recipients already have. A caller that
+// wants to retry only the unaccepted addresses may do so using the fields
+// here; this package holds no retry policy of its own.
+type RecipientError struct {
+	// Bounced lists requested recipients Cloudflare reported as a
+	// permanent bounce.
+	Bounced []string
+	// Unaccepted lists requested recipients Cloudflare's result did not
+	// report as delivered, queued, or bounced at all (for example, a
+	// suppression-list rejection, which the official response schema does
+	// not expose as its own field).
+	Unaccepted []string
+}
+
+func (e *RecipientError) Error() string {
+	switch {
+	case len(e.Bounced) > 0 && len(e.Unaccepted) > 0:
+		return fmt.Sprintf("email: provider bounced %v and never accounted for %v", e.Bounced, e.Unaccepted)
+	case len(e.Bounced) > 0:
+		return fmt.Sprintf("email: provider permanently bounced %v", e.Bounced)
+	default:
+		return fmt.Sprintf("email: provider never confirmed acceptance for %v", e.Unaccepted)
+	}
+}
+
+// verifyAllRecipientsAccepted requires every requested recipient to appear
+// in the result's delivered or queued lists. A recipient absent from every
+// list -- not delivered, not queued, not even reported bounced -- is
+// treated the same as an explicit bounce: unaccepted, not silently fine.
+// A nil result (the response parsed but carried no per-recipient data at
+// all) fails every requested recipient rather than assuming success.
+func verifyAllRecipientsAccepted(requested []string, result *cloudflareSendResult) error {
+	accepted := make(map[string]bool, len(requested))
+	bounced := make(map[string]bool)
+	if result != nil {
+		for _, r := range result.Delivered {
+			accepted[r] = true
+		}
+		for _, r := range result.Queued {
+			accepted[r] = true
+		}
+		for _, r := range result.PermanentBounces {
+			bounced[r] = true
+		}
+	}
+	var bouncedOut, unacceptedOut []string
+	for _, r := range requested {
+		switch {
+		case bounced[r]:
+			bouncedOut = append(bouncedOut, r)
+		case accepted[r]:
+		default:
+			unacceptedOut = append(unacceptedOut, r)
+		}
+	}
+	if len(bouncedOut) == 0 && len(unacceptedOut) == 0 {
+		return nil
+	}
+	return &RecipientError{Bounced: bouncedOut, Unaccepted: unacceptedOut}
+}
+
+// truncateForError bounds a provider response body embedded in an error
+// message, so a pathological or malicious upstream body cannot inflate
+// logs or alert bodies without limit.
+func truncateForError(body []byte) string {
+	const max = 500
+	text := strings.TrimSpace(string(body))
+	if len(text) > max {
+		return text[:max] + "…"
+	}
+	return text
 }
 
 // isUnsubmittedTransportError reports whether err happened before any byte

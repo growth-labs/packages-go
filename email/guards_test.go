@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,8 +23,8 @@ func TestTokenFileModeGuardIsFalsifiable(t *testing.T) {
 		if mutation.GuardsDisabled() {
 			mode = 0o600
 		}
-		path := filepath.Join(t.TempDir(), "fastmail.token")
-		if err := os.WriteFile(path, []byte("fm1-abc123\n"), mode); err != nil {
+		path := filepath.Join(t.TempDir(), "cloudflare-email.token")
+		if err := os.WriteFile(path, []byte("cf-token-abc123\n"), mode); err != nil {
 			return err
 		}
 		_, err := LoadTokenFile(path)
@@ -33,13 +32,16 @@ func TestTokenFileModeGuardIsFalsifiable(t *testing.T) {
 	})
 }
 
-func TestEstateIdentityGuardIsFalsifiableAtSend(t *testing.T) {
+func TestMissingCredentialGuardIsFalsifiableAtNew(t *testing.T) {
 	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
-		// Unsafe case: the Fastmail account offers only the operator's own
-		// personal identity. Send must refuse rather than fall back to it.
-		fake := newFakeJMAPServer(t)
-		fake.omitFulcrumIdentity = !mutation.GuardsDisabled()
-		_, err := fake.client(t).Send(context.Background(), []string{"grant@fulcrum-labs.com"}, "subject", "body")
+		// Unsafe case: the API token is missing. With the guard removed, a
+		// config that should be rejected at boot time instead builds a
+		// Client that would only fail on the first real send.
+		cfg := validConfig()
+		if !mutation.GuardsDisabled() {
+			cfg.APIToken = ""
+		}
+		_, err := New(cfg, nil)
 		return err
 	})
 }
@@ -48,32 +50,29 @@ func TestMessageIDInjectionGuardIsFalsifiableAtSend(t *testing.T) {
 	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
 		// Unsafe case: a Message-ID smuggling a second header. With the
 		// guard removed the same call reaches the transport and succeeds.
-		messageID := "injected@fulcrum-labs.com\r\nBcc: someone@example.com"
+		messageID := "injected@fulcrum-portal.com\r\nBcc: someone@example.com"
 		if mutation.GuardsDisabled() {
-			messageID = "injected@fulcrum-labs.com"
+			messageID = "injected@fulcrum-portal.com"
 		}
-		fake := newFakeJMAPServer(t)
+		fake := newFakeCloudflareServer(t)
 		_, err := fake.client(t).SendWithMessageID(context.Background(),
 			[]string{"grant@fulcrum-labs.com"}, "subject", "body", messageID)
 		return err
 	})
 }
 
-func TestSentProofDraftGuardIsFalsifiable(t *testing.T) {
+func TestProviderRejectionGuardIsFalsifiableAtSend(t *testing.T) {
 	testkit.ProveGuard(t, func(mutation testkit.Mutation) error {
-		// Unsafe case: the message exists but only as a draft. Sent proof
-		// must not accept it; with the draft guard removed (the fake filing
-		// the same message in Sent) the identical lookup succeeds.
-		fake := newFakeJMAPServer(t)
-		fake.sentMessageIDs = []string{"stable@fulcrum-labs.com"}
-		fake.draftOnly = !mutation.GuardsDisabled()
-		found, err := fake.client(t).FindSentByMessageID(context.Background(), "stable@fulcrum-labs.com")
-		if err != nil {
-			return err
+		// Unsafe case: Cloudflare reports success:false. With the guard
+		// removed (the fake reporting success instead), the identical call
+		// returns no error -- proving the rejection check, not something
+		// else, is what fails the unsafe case.
+		fake := newFakeCloudflareServer(t)
+		fake.success = mutation.GuardsDisabled()
+		if !mutation.GuardsDisabled() {
+			fake.responseBody = `{"success":false,"errors":[{"code":10000,"message":"rejected"}]}`
 		}
-		if !found {
-			return errors.New("message is not provably in Sent")
-		}
-		return nil
+		_, err := fake.client(t).Send(context.Background(), []string{"grant@fulcrum-labs.com"}, "subject", "body")
+		return err
 	})
 }
